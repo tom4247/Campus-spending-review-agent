@@ -1,0 +1,7 @@
+id,category,description,amount,status
+TR001,Travel,Paid travel expenses,800.00,paid
+TR002,Travel,Outstanding hotel reservation,900.00,committed
+EV001,Events,Welcome event,600.00,paid
+EV002,Events,Venue reservation,500.00,committed
+MA001,Marketing,Printed flyers,150.00,paid
+EQ001,Equipment,Microphone,200.00,paid

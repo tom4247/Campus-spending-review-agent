@@ -1,0 +1,11 @@
+{
+  "label": "Illustrative student organization policies — not official CMU policy",
+  "approval_threshold": "1000.00",
+  "escalation_authority": "Organization advisor or designated financial reviewer",
+  "max_record_age_days": 14,
+  "urgent_within_days": 1,
+  "quote_required": true,
+  "restricted_categories": {
+    "Equipment": "Equipment funding requires advisor authorization before purchase."
+  }
+}
