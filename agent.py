@@ -37,3 +37,28 @@ def explain(review):
     if not response.output_text.strip():
         raise ValueError('No explanation returned.')
     return response.output_text
+
+
+def draft_request(description, categories, today):
+    from openai import OpenAI
+
+    fields = ('description', 'purpose', 'amount', 'category', 'deadline', 'vendor', 'quote')
+    properties = {field: {'type': ['string', 'null']} for field in fields}
+    properties['category']['enum'] = [*categories, None]
+    response = OpenAI(timeout=25, max_retries=0).responses.create(
+        model=os.getenv('OPENAI_MODEL', 'gpt-4.1-mini'),
+        instructions=(
+            f'Today is {today}. Extract purchase request details for the user to confirm. '
+            'Use null for missing or ambiguous details. Never invent a vendor or quote. '
+            'Suggest a category only if clearly supported, and use only allowed categories. '
+            'Use a decimal string without currency symbols for amount and YYYY-MM-DD for deadline. '
+            'Resolve relative dates only when unambiguous.'
+        ),
+        input=description,
+        text={'format': {'type': 'json_schema', 'name': 'purchase_request', 'strict': True,
+                         'schema': {'type': 'object', 'properties': properties,
+                                    'required': list(fields), 'additionalProperties': False}}},
+        max_output_tokens=500,
+        store=False,
+    )
+    return json.loads(response.output_text)
