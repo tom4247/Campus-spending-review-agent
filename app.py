@@ -35,7 +35,18 @@ st.dataframe([{'Category': r['category'], 'Allocation': f"${r['allocation']:,.2f
 if any((date.today() - r['verified_on']).days not in range(policies['max_record_age_days'] + 1) for r in overview):
     st.warning('Some records are stale or future-dated. Requests in those categories require verification.')
 with st.expander('Illustrative policies and source records'):
-    st.json({k: str(v) if isinstance(v, Decimal) else v for k, v in policies.items()})
+    st.caption(policies['label'])
+    st.markdown(rf"- **Additional authorization** · Required for requests of \${policies['approval_threshold']:,.2f} or more.")
+    st.markdown(f"- **Record verification** · Category records must have been verified within {policies['max_record_age_days']} days.")
+    st.markdown(f"- **Urgent requests** · Requests due within {policies['urgent_within_days']} day(s) need prompt human review if information is missing or unresolved.")
+    quote_requirement = 'Required' if policies['quote_required'] else 'Optional'
+    st.markdown(f'- **Vendor quote or cost estimate** · {quote_requirement}.')
+    st.markdown(f"- **Escalation contact** · {policies['escalation_authority']}")
+    if policies['restricted_categories']:
+        st.markdown('**Category restrictions**')
+        for category, restriction in policies['restricted_categories'].items():
+            st.markdown(f'- **{category}** · {restriction}')
+    st.markdown('**Source ledger**')
     st.dataframe([{**r, 'amount': str(r['amount'])} for r in ledger], hide_index=True)
     st.caption('Edit local files in data/ to configure the prototype. Verification dates mean the entire category ledger has been reconciled, including outstanding commitments.')
 
