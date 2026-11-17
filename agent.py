@@ -1,4 +1,4 @@
-there"""Bounded OpenAI explanation with one read-only tool and no file access."""
+"""Bounded OpenAI explanation with one read-only tool and no file access."""
 import json
 import os
 
