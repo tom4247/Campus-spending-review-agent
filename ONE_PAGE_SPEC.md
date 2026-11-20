@@ -1,33 +1,32 @@
 # Campus Organization Spending Review Agent
 
-**One-page specification | Local decision-support prototype**
+**One-page specification | Target design**
 
-## Decision it supports
-Helps a student organization treasurer decide whether a proposed purchase is ready for human approval, needs more information, or requires additional review. It checks available category funds, outstanding commitments, required request details, record freshness, and configured spending rules. All records are mock and all policies are illustrative—not official CMU policy.
+## Decision and authority
 
-## Inputs
-- **Purchase request:** description, purpose, USD amount, user-selected budget category, date needed, vendor, quote or cost-estimate text, and optional comments.
-- **Budget records:** category allocations and dates when each category was last reconciled (`data/budgets.csv`).
-- **Ledger:** paid expenses and outstanding commitments, each with a unique ID, category, description, amount, and status (`data/ledger.csv`).
-- **Policy configuration:** authorization threshold, record-age limit, urgency window, quote requirement, restricted categories, and escalation authority (`data/policies.json`). The current date drives freshness and deadline checks.
+The **OpenAI model selects the purchase recommendation** after reviewing the request, verified financial facts, and configured policy. It chooses **APPROVE**, **DEFER**, or **ESCALATE** and explains why. Python calculates financial facts, validates records, and checks that the model's output is safe to display. The treasurer or designated reviewer makes the final spending decision.
 
-## Outputs
-One recommendation, with reasons, applied rules, missing information, and next steps:
-- **APPROVE:** funds are sufficient, required fields are complete, records are current, and configured checks pass. This is a recommendation only.
-- **DEFER:** information is missing or records need verification, with no condition requiring escalation.
-- **ESCALATE:** funds are insufficient, a category restriction applies, the authorization threshold is met, or an urgent deadline coincides with unresolved information. Escalation takes priority over deferral.
+## Inputs and decision flow
 
-The review shows allocation, paid expenses, commitments, available funds, projected balance after purchase, shortfall, and review/verification dates. Available funds equal **allocation − paid expenses − outstanding commitments**. Python performs currency calculations and selects the recommendation. An optional AI explanation summarizes the verified result; the underlying review remains visible and works if AI is unavailable.
+1. A requester submits a purchase description, purpose, USD amount, category, needed-by date, vendor, and quote or estimate. A natural-language draft is optional. The requester confirms extracted details.
+2. Python validates the submission and reads the mock budgets, ledger, and policies. It calculates available funds as **allocation − paid expenses − outstanding commitments**, plus the projected balance and any shortfall.
+3. OpenAI receives the relevant request details and uses a read-only tool to retrieve the verified facts and applicable policy. It returns a structured recommendation with reasons, supporting evidence, and the next action.
+4. Streamlit validates and displays the recommendation alongside the underlying facts. If the model call fails or its response violates a mandatory rule, the app displays **Review unavailable** and directs the requester to a human reviewer.
 
-**Current sample rules:** requests of $1,000 or more need additional authorization; Equipment purchases need advisor authorization; records must be verified within 14 days; a quote or estimate is required; a deadline today or tomorrow is urgent.
+## Outcomes
 
-## What it refuses to do
-- Authorize purchases, send payments, commit funds, or change budgets or ledger records.
-- Return an APPROVE recommendation when required information is missing, records are stale or future-dated, or configured escalation conditions apply. Malformed or inconsistent source data blocks review.
-- Let the AI choose or override the recommendation, perform financial calculations, invent policies, access files, or execute write actions. Its only tool retrieves the verified review.
-- Treat illustrative rules as official university policy or grant exceptions to restrictions.
+| Model recommendation | Meaning | Next action |
+|---|---|---|
+| **APPROVE** | The request is ready for treasurer review. Funds are sufficient, the evidence is complete, and applicable rules are satisfied. | Treasurer verifies the request and decides whether to authorize spending. |
+| **DEFER** | The requester can resolve missing or conflicting information, or the treasurer needs to reconcile stale records. | Resolve the named issue and resubmit. |
+| **ESCALATE** | A shortfall, restriction, authorization threshold, urgency with an unresolved issue, or policy ambiguity calls for human judgment. | Send the review summary to the named advisor or designated financial reviewer before committing funds. |
 
-**Review limits:** it checks that quote text is present, but does not authenticate documents, verify vendors, compare quoted and requested amounts, infer restrictions from free text, or judge the accuracy of the selected category and stated purpose. Different ledger IDs can still represent the same obligation; human reconciliation is required.
+Configured escalation takes precedence over deferral. The sample policy uses an inclusive $1,000 threshold, requires advisor authorization for Equipment, treats today and tomorrow as urgent, and requires records verified within 14 days. These policies are illustrative.
 
-## Human in the loop
-The **treasurer** supplies the request, selects the category, reconciles records and commitments, verifies supporting documents and purpose, and makes the final spending decision—even after APPROVE. For ESCALATE, the treasurer contacts the **organization advisor or designated financial reviewer** before committing funds. For DEFER, the treasurer resolves missing information or verifies records and reruns the review. Any AI commentary is fallible and must be checked against the displayed Python review.
+## Boundaries and evaluation
+
+The model can read the evidence needed for review. It has no authority to spend, approve on behalf of the organization, change records, or grant exceptions. The first handoff is manual. Streamlit provides the contact or role and a summary the requester can share. Missing credentials or failed validation leave the recommendation unavailable and the human review path visible.
+
+Acceptance tests cover recommendation accuracy, mandatory escalation, quote and category ambiguity, evidence grounding, and failure handling. The existing 12-case evaluation measures the current Python decision engine. The model-led design requires a new evaluation run.
+
+**Implementation status:** The current code still selects recommendations in Python. OpenAI optionally drafts requests and explains decisions. The README documents the model-led architecture and migration.

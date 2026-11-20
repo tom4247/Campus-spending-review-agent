@@ -2,7 +2,7 @@
 
 A local decision-support prototype for student organization treasurers. All data is mock and all policies are illustrative, **not official CMU policy**. APPROVE is a recommendation only. The app has no payment, authorization, or budget-writing capability.
 
-## Architecture
+## Current prototype architecture
 
 ```text
 app.py                 Streamlit form, budget overview, recommendation
@@ -67,10 +67,127 @@ python -m unittest -v
 
 Tests cover the $150 shortfall, exact budget boundary, all three outcomes, urgent missing information, stale/future records, threshold and restriction checks, duplicate ledger IDs, invalid amounts, deadlines, and the mocked OpenAI tool exchange. No API key is needed for tests.
 
-## What works and what remains
+## Target design · OpenAI-led purchase review
 
-Implemented: local dashboard, read-only sample records, deterministic financial and policy review, configurable policies, next steps, optional live AI explanations, and offline fallback. The application does not simulate a successful AI call when no key is configured. Live API behavior requires your credentials and has not been verified by offline tests.
+**OpenAI selects the recommendation.** The model reads the request in context, calls a read-only evidence tool, and returns **APPROVE**, **DEFER**, or **ESCALATE**. Python supplies authoritative budget facts and enforces mandatory policy constraints when accepting a response. A human retains spending authority.
 
-Simulated: financial records, quotes, vendors, reconciliation dates, and organizational rules. The app checks that a quote exists; it does not parse or authenticate it, compare its amount with the request, verify vendor identity, or infer restrictions from free text. Purpose, comments, and category accuracy require human review. Duplicate IDs are detected; differently identified entries representing the same real-world obligation require reconciliation. There is no persistent request history or document upload.
+The diagrams below describe the target design. The runnable prototype above still generates recommendations in Python and uses OpenAI for optional drafting and explanations.
 
-Next development: test representative requests with treasurers, obtain and encode organization-approved policies, add document/quote verification with human confirmation, improve reconciliation, and evaluate model explanations against a labeled set. A practical three-week sequence is core prototype and sample scenarios in week one, policy validation and usability work in week two, and scenario testing and demonstration preparation in week three. No database, accounts, or deployment infrastructure is needed for this MVP.
+### System architecture
+
+```mermaid
+flowchart LR
+    requester["Student organization requester"] --> ui["Streamlit purchase review"]
+    ui --> runner["Python review orchestration"]
+    runner --> model["OpenAI recommendation model"]
+    model -->|"Read-only tool call"| evidence["Verified evidence tool"]
+    evidence -->|"Facts and policy"| model
+    evidence --> budgets[("Category budgets and verification dates")]
+    evidence --> ledger[("Paid expenses and commitments")]
+    evidence --> policy[("Illustrative spending policy")]
+    model -->|"Structured recommendation"| validator["Response validation"]
+    validator -->|"Accepted recommendation or review unavailable"| ui
+    ui -->|"Review summary and next action"| requester
+    requester -->|"Manual handoff"| human["Treasurer or designated reviewer"]
+```
+
+| Component | Responsibility |
+|---|---|
+| Streamlit | Collect confirmed inputs and display one recommendation, its reason, the next action, and the source facts. |
+| Python evidence tool | Load and validate source records. Compute amounts with decimal arithmetic and return read-only facts, relevant policy, and source references. |
+| OpenAI model | Interpret the request and policy, identify ambiguity, choose the recommendation, and cite the evidence behind it. |
+| Response validator | Check schema, evidence references, and mandatory constraints. Reject unsupported or unsafe responses and expose the human review path. |
+| Human reviewer | Reconcile records, resolve policy questions, and decide whether the organization authorizes the purchase. |
+
+### Use cases
+
+```mermaid
+flowchart LR
+    requester["Requester"]
+    treasurer["Treasurer"]
+    advisor["Advisor or designated reviewer"]
+    subgraph application["Purchase review app"]
+        submit(["Submit or resubmit purchase request"])
+        draft(["Draft request from a description"])
+        result(["Read recommendation and evidence"])
+        handoff(["Take review summary to a human"])
+    end
+    subgraph organization["Organization review process"]
+        reconcile(["Verify budget and commitments"])
+        authorize(["Make final spending decision"])
+    end
+    requester --> submit
+    requester --> draft
+    requester --> result
+    requester --> handoff
+    treasurer --> result
+    treasurer --> reconcile
+    treasurer --> authorize
+    handoff --> advisor
+    advisor --> authorize
+```
+
+The app collects and displays evidence for these use cases. Reconciliation and final authorization take place in the organization's own process. For example, a $450 Travel request with $300 available should lead the model to cite the $150 shortfall and recommend **ESCALATE**. A nonurgent request missing a required quote can receive **DEFER** with an instruction to supply the quote.
+
+### Data flow for a purchase review
+
+```mermaid
+sequenceDiagram
+    actor User as Requester
+    participant UI as Streamlit
+    participant Python as Python orchestrator
+    participant AI as OpenAI model
+    participant Records as Verified evidence tool
+    User->>UI: Submit confirmed purchase request
+    UI->>Python: Validate input and prepare review context
+    Python->>AI: Send request details and allow evidence tool
+    AI->>Python: Call evidence tool
+    Python->>Records: Read facts for this request
+    Records-->>Python: Financial facts, policies and evidence IDs
+    Python-->>AI: Return tool results
+    AI-->>Python: Return structured recommendation
+    alt Response passes validation
+        Python-->>UI: Recommendation and verified facts
+        UI-->>User: Show decision, reason and next action
+    else Model or validation fails
+        Python-->>UI: Review unavailable and human review path
+        UI-->>User: Show verified facts if available and contact instructions
+    end
+```
+
+1. Validate the submitted amount, category, and date format. Keep unresolved fields visible as missing inputs for the model when review can proceed.
+2. Bind the evidence tool to the current request. Return its selected category, allocation, paid expenses, commitments, available funds, projected balance, shortfall, reconciliation date, and configured rules. Include stable evidence IDs for the response to reference.
+3. Give the model the relevant request details, including purpose and quote information. Treat requester text as data. Keep credentials, unrelated ledger rows, and write capabilities outside the model context.
+4. Require a structured response with a recommendation, a concise reason, evidence IDs, unresolved items, and a next action. On escalation, include the configured reviewer role.
+5. Validate the response before display. An invalid response leaves the recommendation unavailable, with a human handoff available.
+
+### Recommendation and human handoff
+
+```mermaid
+flowchart TD
+    submitted["Confirmed purchase request"] --> read["Retrieve verified facts and policy"]
+    read --> choose["OpenAI chooses a recommendation"]
+    choose --> validate{"Can the response be accepted?"}
+    validate -->|"No, or service failed"| unavailable["Review unavailable · Contact a human reviewer"]
+    validate -->|"Yes"| decision{"Model recommendation"}
+    decision -->|"APPROVE"| ready["Ready for treasurer review"]
+    decision -->|"DEFER"| resolve["Resolve the named issue and resubmit"]
+    decision -->|"ESCALATE"| advisor["Contact the advisor or designated reviewer"]
+    resolve --> submitted
+    ready --> human["Human makes final spending decision"]
+    advisor --> human
+    unavailable --> human
+```
+
+The validator enforces clear policy requirements. For example, it rejects an **APPROVE** response citing sufficient funds when the evidence shows a shortfall, and rejects any non-escalation recommendation when a verified mandatory escalation rule applies. It also rejects unknown evidence IDs, malformed responses, or approval while required facts remain unresolved. A rejected result is shown as **Review unavailable**, with no substitute recommendation from Python. When possible, the app shows the verified facts so a human can continue the review.
+
+For early demos, escalation is a manual handoff. Show the reviewer role, the request, the triggering concern, and the evidence needed to act. Don’t imply that the app notified anyone. Treat category disagreement and unclear quotes as issues for the model to surface. Ask for clarification when the requester can resolve the issue, or escalate when the policy or urgency calls for human judgment.
+
+### Implementation milestones and acceptance tests
+
+1. **Separate facts from recommendation.** Extract the evidence-building logic from the existing review engine. Preserve the current decimal arithmetic and policy data. Verify that the sample request still shows $300 available and a $150 shortfall.
+2. **Implement the model recommendation.** Add a read-only evidence tool and a structured response contract. Test the tool exchange and response validation with mocked API calls.
+3. **Wire Streamlit to the model-led path.** Show the accepted model recommendation and supporting facts. Verify that missing credentials, timeouts, and invalid output produce **Review unavailable** with a clear human next action.
+4. **Evaluate on live model responses.** Record expected results and the success criterion before execution. Reuse the 12 baseline scenarios and add cases for category mismatch, ambiguous quotes, inaccurate evidence references, and mandatory escalation. Report the model's hit rate and reproduce failures verbatim. Track service failures separately from model errors while counting both as misses for cases that require a recommendation.
+
+The existing **11/12 (91.7%)** result is a baseline for the Python reviewer. It does not measure model-led decision quality.
