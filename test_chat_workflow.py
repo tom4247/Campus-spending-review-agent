@@ -6,6 +6,15 @@ from streamlit.testing.v1 import AppTest
 
 
 class ChatWorkflowTests(unittest.TestCase):
+    def test_streamlit_boolean_secret_enables_chat(self):
+        with patch.dict(os.environ, {'GEMINI_CHAT_ENABLED': 'false', 'GEMINI_API_KEY': ''}):
+            app = AppTest.from_file('app.py')
+            app.secrets['GEMINI_API_KEY'] = 'mock-key'
+            app.secrets['GEMINI_CHAT_ENABLED'] = True
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertFalse(app.chat_input[0].disabled)
+
     def test_follow_up_updates_the_same_review_and_exposes_a_handoff(self):
         settings = {'GEMINI_CHAT_ENABLED': 'true', 'GEMINI_API_KEY': 'mock-key',
                     'SUPABASE_URL': 'https://example.supabase.co', 'SUPABASE_SECRET_KEY': 'sb_secret_mock'}

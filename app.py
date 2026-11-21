@@ -11,16 +11,17 @@ from submission_log import record_submission, save_review
 
 load_dotenv()
 st.set_page_config(page_title='Campus Spending Review', page_icon='🎓', layout='wide')
+gemini_key = os.getenv('GEMINI_API_KEY')
+chat_setting = os.getenv('GEMINI_CHAT_ENABLED', 'false')
 try:
-    # Accessing the secrets mapping also loads top-level Cloud secrets into the environment.
-    st.secrets.get('SUPABASE_URL')
+    gemini_key = st.secrets.get('GEMINI_API_KEY', gemini_key)
+    chat_setting = st.secrets.get('GEMINI_CHAT_ENABLED', chat_setting)
 except FileNotFoundError:
     pass
 supabase_url = os.getenv('SUPABASE_URL')
 supabase_key = os.getenv('SUPABASE_SECRET_KEY')
 logging_enabled = bool(supabase_url and supabase_key)
-gemini_key = os.getenv('GEMINI_API_KEY')
-chat_enabled = bool(gemini_key) and os.getenv('GEMINI_CHAT_ENABLED', 'false').lower() == 'true'
+chat_enabled = isinstance(gemini_key, str) and bool(gemini_key.strip()) and str(chat_setting).strip().lower() == 'true'
 
 st.title('Campus Spending Review')
 st.caption('A second look before your organization commits funds.')
