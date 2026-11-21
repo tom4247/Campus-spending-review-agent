@@ -15,6 +15,25 @@ class ChatWorkflowTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertFalse(app.chat_input[0].disabled)
 
+    def test_openai_can_be_enabled_in_streamlit_secrets(self):
+        from chat_review import ChatReviewError
+
+        with patch('agent.review_chat', side_effect=ChatReviewError('Test OpenAI response')) as openai, patch(
+            'gemini_review.review_chat'
+        ) as gemini, patch.dict(os.environ, {'SUPABASE_URL': '', 'SUPABASE_SECRET_KEY': ''}):
+            app = AppTest.from_file('app.py')
+            app.secrets['OPENAI_API_KEY'] = 'mock-key'
+            app.secrets['OPENAI_CHAT_ENABLED'] = True
+            app.secrets['GEMINI_API_KEY'] = 'mock-gemini-key'
+            app.secrets['GEMINI_CHAT_ENABLED'] = True
+            app.run()
+            self.assertFalse(app.chat_input[0].disabled)
+            app.chat_input[0].set_value('A test van request').run()
+            self.assertFalse(app.exception)
+            self.assertEqual(openai.call_args.args[0], [{'role': 'user', 'text': 'A test van request'}])
+            gemini.assert_not_called()
+            self.assertTrue(any('Test OpenAI response' in item.value for item in app.warning))
+
     def test_follow_up_updates_the_same_review_and_exposes_a_handoff(self):
         settings = {'GEMINI_CHAT_ENABLED': 'true', 'GEMINI_API_KEY': 'mock-key',
                     'SUPABASE_URL': 'https://example.supabase.co', 'SUPABASE_SECRET_KEY': 'sb_secret_mock'}

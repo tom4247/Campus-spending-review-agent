@@ -10,7 +10,7 @@ def build_reply(result, escalation_authority):
         if any(item.startswith('Verify category records') for item in result['evidence']['missing']):
             action = 'Reconcile the budget records before relying on this review. Reply with other missing details.'
         else:
-            action = 'Reply with the details Gemini asked for to continue this review.'
+            action = 'Reply with the requested details to continue this review.'
     else:
         action = f'Share the escalation summary with {escalation_authority} before committing funds.'
     text = result['reason']

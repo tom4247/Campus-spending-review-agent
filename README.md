@@ -1,18 +1,18 @@
 # Campus Organization Spending Review Agent
 
-The agent reviews one proposed purchase at a time and returns **APPROVE**, **DEFER**, or **ESCALATE**. In chat, **Gemini makes that recommendation** using the purchase details, verified budget figures, and the club's spending rules. Streamlit shows the outcome, the calculation behind it, and what to do next.
+The agent reviews one proposed purchase at a time and returns **APPROVE**, **DEFER**, or **ESCALATE**. In chat, **the configured model makes that recommendation** using the purchase details, verified budget figures, and the club's spending rules. Streamlit shows the outcome, the calculation behind it, and what to do next.
 
 The Team Smile project proposal gives the treasurer responsibility for authorizing actual spending. **APPROVE** completes the agent's review of a routine expense. The treasurer verifies the result before committing funds. **ESCALATE** sends a different signal: the request needs judgment or authority beyond the routine review, such as a budget transfer or an exception. The prototype uses synthetic data and illustrative policies.
 
-**Two ways to review:** Gemini chat is the main interface. Open **Manual review** for the rule-based form. See [Running the app](#running-the-app) for setup.
+**Two ways to review:** Chat is the main interface and supports OpenAI or Gemini. Open **Manual review** for the rule-based form. See [Running the app](#running-the-app) for setup.
 
 ## How the agent handles an expense
 
 ```mermaid
 flowchart TD
-    request["Member describes a proposed expense in chat"] --> details["Gemini extracts the purchase details"]
+    request["Member describes a proposed expense in chat"] --> details["The model extracts the purchase details"]
     details --> evidence["Python prepares verified budget facts and spending rules"]
-    evidence --> decision["Gemini reviews the expense and chooses an outcome"]
+    evidence --> decision["The model reviews the expense and chooses an outcome"]
     decision --> validation{"Validate the agent's outcome"}
     validation -->|"APPROVE"| approved["APPROVE · Agent approves the routine expense"]
     validation -->|"DEFER"| deferred["DEFER · Agent names what to fix or verify"]
@@ -52,7 +52,7 @@ Streamlit displays an agent outcome only after the response passes validation. T
 flowchart LR
     member["Member or treasurer"] -->|"Purchase request"| form["Streamlit request form"]
     form --> host["Python review orchestration"]
-    host <-->|"Extract details and choose a recommendation"| model["Gemini expense reviewer"]
+    host <-->|"Extract details and choose a recommendation"| model["Chat model"]
     host --> evidence["Build verified evidence"]
     records[("Synthetic budgets, ledger and policy")] --> evidence
     evidence -->|"Facts and policy references"| host
@@ -68,7 +68,7 @@ flowchart LR
 |---|---|
 | Streamlit | Collect the member's request in chat, show the decision and evidence, and prepare a summary for human escalation. |
 | Python evidence builder | Read the budget, paid expenses, commitments, reconciliation dates, and rules. Use decimal arithmetic to calculate the available balance, projected balance, and shortfall. |
-| Gemini expense reviewer | Interpret the purpose, category, quote, and applicable rules. Use the verified evidence and choose APPROVE, DEFER, or ESCALATE. |
+| Chat model | Interpret the purpose, category, quote, and applicable rules. Use the verified evidence and choose APPROVE, DEFER, or ESCALATE. |
 | Response validator | Check the outcome, cited evidence, arithmetic claims, and mandatory rules. Block any approval with a verified shortfall, applicable restriction, or unresolved required information. Require escalation when a configured rule calls for it. |
 | Treasurer | Verify routine expenses, reconcile records, and execute authorized decisions outside the prototype. |
 | Advisor or designated financial reviewer | Review exceptions, transfers, and other requests that require additional authority. |
@@ -78,7 +78,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     member["Organization member"]
-    agent["Gemini expense reviewer"]
+    agent["Chat model"]
     treasurer["Treasurer"]
     reviewer["Advisor or designated financial reviewer"]
     subgraph app["Purchase review workflow"]
@@ -108,7 +108,7 @@ sequenceDiagram
     actor Member as Requester
     participant UI as Streamlit
     participant Host as Python orchestrator
-    participant AI as Gemini
+    participant AI as Chat model
     participant Data as Budget, ledger and policy
     Member->>UI: Describe purchase in chat
     UI->>Host: Send the active request conversation
@@ -128,23 +128,25 @@ sequenceDiagram
 ```
 
 1. **Request.** Capture the description, purpose, amount in USD, category, date needed, vendor, and quote or estimate. Represent missing fields explicitly. Treat request text as data.
-2. **Evidence.** Calculate the current request’s category balance, projected balance, and shortfall. Send those figures, reconciliation date, deadline and urgency, and applicable restrictions and thresholds to Gemini. Keep credentials, unrelated records, and write access outside the model context.
+2. **Evidence.** Calculate the current request’s category balance, projected balance, and shortfall. Send those figures, reconciliation date, deadline and urgency, and applicable restrictions and thresholds to the model. Keep credentials, unrelated records, and write access outside the model context.
 3. **Decision.** Require an outcome and concise reason. For ESCALATE, the app displays the configured reviewer role. For DEFER, the requester can reply in the same chat.
 4. **Validation.** Validate the response and enforce the allowed outcomes. Required escalation takes precedence, and unresolved required inputs prevent approval. The app displays verified figures separately from the model’s reason.
 
 ### Evaluation
 
-The existing **11/12 (91.7%)** score covers the Python form review. Test the Gemini chat path separately with the original scenarios and conversational follow-ups, ambiguous categories, conflicting quotes, and stale records. Record the expected decisions and balances first. A recommendation to approve a request that exceeds available funds or violates a stated rule fails the evaluation.
+The existing **11/12 (91.7%)** score covers the Python form review. Test the active chat model separately with the original scenarios and conversational follow-ups, ambiguous categories, conflicting quotes, and stale records. Record the expected decisions and balances first. A recommendation to approve a request that exceeds available funds or violates a stated rule fails the evaluation.
 
 ## Running the app
 
-Gemini chooses recommendations in chat. The manual fallback uses Python rules and works without an API key.
+Chat uses OpenAI or Gemini to choose recommendations. The manual fallback uses Python rules and works without an API key.
 
 ### Current code layout
 
 ```text
 app.py                 Streamlit chat, purchase form, and budget overview
-gemini_review.py        Gemini request extraction and recommendation
+chat_review.py          Shared request extraction and evidence-based decision workflow
+agent.py                OpenAI Responses API chat adapter
+gemini_review.py        Gemini API chat adapter
 review.py              Read-only CSV loading, validation, Decimal calculations, policy checks
 purchase_chat.py       Chat follow-ups, escalation summaries, and review records
 submission_log.py      Supabase writes for manual submissions and chat reviews
@@ -155,7 +157,7 @@ test_review.py         Financial, decision, data validation, and mocked API test
 requirements.txt       Python dependencies
 ```
 
-The user selects the category in the manual form. Gemini extracts it from the conversation in chat. Python loads and validates the source files, calculates `available = allocation - paid - commitments`, checks completeness, record freshness, restrictions, and approval thresholds, and selects a recommendation. Decimal arithmetic avoids floating-point currency errors.
+The user selects the category in the manual form. The chat model extracts it from the conversation. Python loads and validates the source files, calculates `available = allocation - paid - commitments`, checks completeness, record freshness, restrictions, and approval thresholds, and selects a recommendation. Decimal arithmetic avoids floating-point currency errors.
 
 Escalation takes priority: a shortfall, restriction, threshold requiring authorization, or urgent unresolved information produces ESCALATE. Other missing information or stale records produces DEFER. Otherwise the recommendation is APPROVE. Urgency alone does not escalate an otherwise complete, compliant request. The authorization threshold is inclusive.
 
@@ -172,16 +174,16 @@ streamlit run app.py
 
 Open the local URL printed by Streamlit, normally http://localhost:8501. Stop with Ctrl+C. The initial review works without an API key.
 
-### Enable Gemini chat
+### Enable OpenAI chat
 
-Chat is paused by default while the replacement key is pending. Add these top-level settings to Streamlit Secrets, or use the same names in the local `.env` file.
+Add a key from a funded OpenAI API project and these top-level settings to **Streamlit → App settings → Secrets**. For local testing, use the same names in `.env`.
 
 ```toml
-GEMINI_API_KEY = "your_actual_key"
-GEMINI_CHAT_ENABLED = true
+OPENAI_API_KEY = "your_actual_key"
+OPENAI_CHAT_ENABLED = true
 ```
 
-The default model is `gemini-3.8-flash`. Optionally set `GEMINI_MODEL` to another model your key can access that supports structured output. Keep the key in Secrets or `.env`. [Gemini model documentation](https://aistudio.google.com/docs/models/gemini-3.8-flash)
+The default, `gpt-6-luna`, uses Standard rates and sets reasoning effort to `none`. The two responses per chat turn use structured output with a 512-token cap per response. Set `OPENAI_CHAT_MODEL` only if you want to use another model that supports structured outputs. OpenAI takes priority when enabled. With OpenAI off, Gemini can still be enabled with `GEMINI_API_KEY` and `GEMINI_CHAT_ENABLED = true`. [GPT-6 Luna pricing and capabilities](https://developers.openai.com/api/docs/models/gpt-6-luna)
 
 Open **Review a purchase in chat** and send: “Can we rent a $450 van from Example Van Rentals for our club competition tomorrow? Their quote is $450. Use the Travel budget.” Expect **ESCALATE** for the $150 shortfall. For a follow-up test, send a request with no vendor or quote and reply with the missing details. Choose **Start a new chat request** before reviewing a different purchase.
 
@@ -221,4 +223,4 @@ Each chat request gets one row in `purchase_reviews`. Follow-up replies update t
 python -m unittest -v
 ```
 
-Tests cover the budget and policy boundaries, record validation, the mocked OpenAI tool exchange, and the mocked Gemini request and decision flow. The Gemini tests verify that the model can escalate an affordable request and that the app rejects approval when a verified shortfall requires escalation. No API key is needed for tests.
+Tests cover the budget and policy boundaries, record validation, the mocked OpenAI tool exchange, and the mocked OpenAI and Gemini chat flows. These tests verify that the model can escalate an affordable request and that the app rejects approval when a verified shortfall requires escalation. No API key is needed for tests.

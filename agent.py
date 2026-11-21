@@ -1,4 +1,4 @@
-"""Bounded OpenAI explanation with one read-only tool and no file access."""
+"""OpenAI purchase chat and legacy draft and explanation helpers."""
 import json
 import os
 
@@ -62,3 +62,53 @@ def draft_request(description, categories, today):
         store=False,
     )
     return json.loads(response.output_text)
+
+
+def review_chat(messages, api_key, budgets, ledger, policies, today):
+    """Run the chat review using OpenAI's low-cost structured output model."""
+    from openai import APIConnectionError, APIStatusError, OpenAI
+    from chat_review import ChatReviewError, review_with_model
+
+    default_model = 'gpt-6-luna'
+    model = os.getenv('OPENAI_CHAT_MODEL') or default_model
+    reasoning = {'reasoning': {'effort': 'none'}} if model == default_model else {}
+
+    with OpenAI(api_key=api_key.strip(), timeout=20, max_retries=0) as client:
+        def generate(instruction, data, properties):
+            try:
+                response = client.responses.create(
+                    model=model, instructions=instruction, input=json.dumps(data),
+                    text={'format': {
+                        'type': 'json_schema', 'name': 'purchase_review', 'strict': True,
+                        'schema': {'type': 'object', 'properties': properties,
+                                   'required': list(properties), 'additionalProperties': False},
+                    }},
+                    max_output_tokens=512, store=False, **reasoning,
+                )
+            except APIConnectionError as exc:
+                raise ChatReviewError('OpenAI could not be reached. Try again or use Manual review.') from exc
+            except APIStatusError as exc:
+                status = exc.status_code
+                if exc.code in ('insufficient_quota', 'billing_hard_limit_reached') or status == 402:
+                    message = 'OpenAI has no available API credits or has reached its spending limit. Check API billing.'
+                elif status in (401, 403):
+                    message = 'OpenAI denied access. Check the API key and project permissions in Streamlit Secrets.'
+                elif status == 404:
+                    message = 'The OpenAI model is unavailable to this project. Check OPENAI_CHAT_MODEL.'
+                elif status == 429:
+                    message = 'OpenAI is at its usage limit. Try again later or use Manual review.'
+                else:
+                    message = 'OpenAI could not complete the review. Try again or use Manual review.'
+                raise ChatReviewError(f'{message} (HTTP {status})') from exc
+
+            try:
+                if response.status != 'completed':
+                    raise ValueError('Incomplete OpenAI response.')
+                decoded = json.loads(response.output_text)
+                if not isinstance(decoded, dict) or decoded.keys() != properties.keys():
+                    raise ValueError('Unexpected OpenAI response fields.')
+                return decoded
+            except (TypeError, ValueError) as exc:
+                raise ChatReviewError('OpenAI returned an incomplete review. Try again or use Manual review.') from exc
+
+        return review_with_model(messages, budgets, ledger, policies, today, generate)

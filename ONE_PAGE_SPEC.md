@@ -1,32 +1,27 @@
 # Campus Organization Spending Review Agent
 
-**One-page specification | Chat spending review**
+**One-page specification | Chat-first prototype**
 
-## What the agent decides
+## What it does
 
-The **Gemini chat agent reviews one proposed expense at a time and returns APPROVE, DEFER, or ESCALATE**. An APPROVE completes the agent's routine review. Under the project proposal, the treasurer verifies the result and authorizes spending before committing funds. An ESCALATE identifies the person or body that can resolve an exception or give additional approval.
+A requester describes one proposed purchase in chat. The configured model extracts the item, purpose, USD amount, spending category, needed-by date, vendor, and quote. Python reads the synthetic budget, ledger, and policy records and calculates **available funds = allocation − paid expenses − outstanding commitments**. The model uses those verified facts to choose a recommendation and explain it. Python limits the available outcomes when a mandatory rule applies or required evidence is missing.
 
-## Inputs and workflow
+| Decision | What happens next |
+|---|---|
+| **APPROVE** | The request is ready for routine treasurer verification and authorization. |
+| **DEFER** | The model asks a specific follow-up question. The requester can reply in the same chat to correct or complete the request. Stale records require reconciliation. |
+| **ESCALATE** | The app shows a copyable summary with the request, available funds, verified policy triggers, and who should review it. The requester shares it with the authorized reviewer. |
 
-1. A member describes the purchase in chat, including the purpose, total, vendor, quote, and deadline when available. Gemini extracts the details, and the member can clarify them in a follow-up message.
-2. Python validates the source records and prepares verified facts from the synthetic budgets, ledger, and spending rules. Available funds equal **allocation − paid expenses − outstanding commitments**.
-3. Gemini receives the verified evidence and selects an outcome with a concise reason. Required escalations and unresolved required fields constrain the outcomes the app accepts.
-4. Streamlit displays the accepted outcome and calculation. Invalid model output, unavailable evidence, and service failures surface **Review unavailable** with a human review path.
+The sample policy requires additional authorization for requests **at or above $1,000**, advisor review for Equipment, and a quote or estimate. Records must be verified within 14 days. A request due today or tomorrow escalates when information is unresolved. Mandatory escalation takes precedence over deferral.
 
-## Outcomes
+## Interface and records
 
-| Agent decision | When it applies | Next action |
-|---|---|---|
-| **APPROVE** | The expense fits the verified budget, required evidence is complete, and applicable rules are satisfied. | Proceed to routine treasurer verification and authorization. |
-| **DEFER** | A missing quote, conflicting amount, uncertain category, or stale record needs clarification and can be resolved before the deadline. | Resolve the named issue and resubmit. |
-| **ESCALATE** | A shortfall, restriction, threshold, policy ambiguity, or urgent unresolved issue requires human judgment. | Copy the escalation summary and send it to the authorized advisor or designated financial reviewer. |
+Chat is the main interface. **Manual review** opens the rule-based form and works while chat is paused or unavailable. To activate OpenAI chat with GPT-6 Luna, set a working `OPENAI_API_KEY` and `OPENAI_CHAT_ENABLED = true` in Streamlit Secrets. Gemini remains separately configurable.
 
-A $450 Travel van rental with $300 available after commitments has a $150 shortfall. The agent should return **ESCALATE** and explain who can review a possible transfer or supplemental funding. The mock policies include an inclusive $1,000 authorization threshold, extra authorization for Equipment, and a 14-day record freshness limit.
+With Supabase configured, each new chat request gets one `purchase_reviews` row. Follow-ups update its transcript, latest status, verified budget snapshot, and next action. Streamlit shows history for the current session. Project administrators can inspect past sessions in Supabase. Manual form inputs are logged separately in `purchase_submissions`.
 
-## Scope and evaluation
+## Boundaries and evaluation
 
-The agent issues the review decision. The organization's authorized people handle orders, payments, changes to the budget, and policy exceptions. Escalation handoff is manual. The prototype uses synthetic records and illustrative spending policies.
+The prototype uses synthetic records and illustrative policies. Authorized people handle spending approval, purchases, payments, ledger changes, and exceptions. The agent produces and records a recommendation. The requester handles escalation delivery.
 
-Evaluate at least 10 synthetic cases with expected outcomes and balances recorded in advance. Check the decision, available-funds calculation, and supporting explanation. Flag missing or conflicting evidence. Any approval that exceeds available funds or violates a stated rule fails the proposal's safety criterion.
-
-**Implementation status:** Set `GEMINI_API_KEY` and `GEMINI_CHAT_ENABLED = true` in app secrets to enable chat. Manual review uses Python to select outcomes and is available without Gemini. Chat is paused until the app owner enables it with a working key. Supabase stores one review per chat request with the transcript, decision, and budget snapshot. The existing 12-case evaluation measures the Python baseline.
+The [evaluation](AGENT_EVALUATION.md) reports the manual-policy replay, offline chat checks, and the prepared live chat test set. The [known weaknesses](KNOWN_WEAKNESSES.md) identify which issues were reproduced and which still require live testing.
