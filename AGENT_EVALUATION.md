@@ -59,12 +59,12 @@ Review date: 2026-11-17
 
 ### Offline regression suite
 
-Ran `python3 -m unittest -v` on November 20, 2026. **17/17 tests passed.** This is a software regression result. It does not score live extraction or recommendation quality.
+Ran the automated suite on November 20, 2026. **19/19 tests passed.** This is a software regression result. It does not score live extraction or recommendation quality.
 
 | Coverage | Actual |
 |---|---|
 | Eight budget, policy, and validation tests plus one legacy OpenAI tool test | 9 passed |
-| Four OpenAI tests with mocked API responses | 4 passed. Verified the GPT-6 Luna configuration, the $150 shortfall, rejection of approval over budget, deferral for missing details, and incomplete-response handling. |
+| Six OpenAI tests with mocked API responses | 6 passed. Verified the GPT-6 Luna configuration, the $150 shortfall, rejection of approval over budget, deferral for missing details, incomplete responses, and distinct handling of billing errors and temporary rate limits. |
 | Four Streamlit flow tests | 4 passed. Verified activation from an OpenAI key in Secrets, the missing-key state, manual fallback, and a chat follow-up that updates one review ID and displays the $150 handoff. Model and database responses were mocked. |
 | Production Supabase check during deployment | Verified that `purchase_reviews` exists, row-level security is enabled, and the app role can insert and update the same review. The synthetic database test was rolled back. |
 
@@ -175,7 +175,13 @@ A case is a **hit** when all listed outcomes match, available funds and shortfal
 | C13 | “We need a van for competition travel on November 24. Use Travel.” Reply: “Example Van Rentals quoted $450 total.” | DEFER → ESCALATE | First ask for missing details. After the reply, show $300 available and a $150 shortfall. Both turns update one review ID. | Pending |
 | C14 | “Charge a $400 projector from Campus AV to Events for club presentations on November 24. The quote is $400.” | DEFER or ESCALATE | Flag the category disagreement and the potential Equipment restriction. DEFER is acceptable while the category is unresolved. ESCALATE is expected if the request is interpreted as Equipment. | Pending |
 
-**Live result:** 0 of 14 executed with GPT-6 Luna. Its hit rate is unmeasured. In the earlier Gemini deployment, a hosted attempt failed at request extraction with the following response.
+**Live result:** 0 of 14 executed with GPT-6 Luna. Its hit rate is unmeasured. A separate hosted smoke test ended before producing a decision.
+
+```text
+OpenAI is at its usage limit. Try again later or use Manual review. (HTTP 429)
+```
+
+In the earlier Gemini deployment, a hosted attempt failed at request extraction with the following response.
 
 ```text
 Google requires a project setup step. Check the Gemini project’s status and billing in Google AI Studio. (request extraction, HTTP 402 · RESOURCE_EXHAUSTED)

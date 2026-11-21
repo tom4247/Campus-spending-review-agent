@@ -1,6 +1,8 @@
 """OpenAI purchase chat and legacy draft and explanation helpers."""
 import json
 import os
+import re
+from time import sleep
 
 
 def explain(review):
@@ -75,31 +77,31 @@ def review_chat(messages, api_key, budgets, ledger, policies, today):
 
     with OpenAI(api_key=api_key.strip(), timeout=20, max_retries=0) as client:
         def generate(instruction, data, properties):
-            try:
-                response = client.responses.create(
-                    model=model, instructions=instruction, input=json.dumps(data),
-                    text={'format': {
-                        'type': 'json_schema', 'name': 'purchase_review', 'strict': True,
-                        'schema': {'type': 'object', 'properties': properties,
-                                   'required': list(properties), 'additionalProperties': False},
-                    }},
-                    max_output_tokens=512, store=False, **reasoning,
-                )
-            except APIConnectionError as exc:
-                raise ChatReviewError('OpenAI could not be reached. Try again or use Manual review.') from exc
-            except APIStatusError as exc:
-                status = exc.status_code
-                if exc.code in ('insufficient_quota', 'billing_hard_limit_reached') or status == 402:
-                    message = 'OpenAI has no available API credits or has reached its spending limit. Check API billing.'
-                elif status in (401, 403):
-                    message = 'OpenAI denied access. Check the API key and project permissions in Streamlit Secrets.'
-                elif status == 404:
-                    message = 'The OpenAI model is unavailable to this project. Check OPENAI_CHAT_MODEL.'
-                elif status == 429:
-                    message = 'OpenAI is at its usage limit. Try again later or use Manual review.'
-                else:
-                    message = 'OpenAI could not complete the review. Try again or use Manual review.'
-                raise ChatReviewError(f'{message} (HTTP {status})') from exc
+            options = {
+                'model': model, 'instructions': instruction, 'input': json.dumps(data),
+                'text': {'format': {
+                    'type': 'json_schema', 'name': 'purchase_review', 'strict': True,
+                    'schema': {'type': 'object', 'properties': properties,
+                               'required': list(properties), 'additionalProperties': False},
+                }},
+                'max_output_tokens': 512, 'store': False, **reasoning,
+            }
+            for attempt in range(2):
+                try:
+                    response = client.responses.create(**options)
+                    break
+                except APIConnectionError as exc:
+                    raise ChatReviewError('OpenAI could not be reached. Try again or use Manual review.') from exc
+                except APIStatusError as exc:
+                    message, delay = _openai_status_message(exc)
+                    if attempt == 0 and delay is not None:
+                        sleep(delay)
+                        continue
+                    code = exc.code if isinstance(exc.code, str) else ''
+                    diagnostic = f'HTTP {exc.status_code}'
+                    if re.fullmatch(r'[a-z0-9_]{1,64}', code):
+                        diagnostic += f' · {code}'
+                    raise ChatReviewError(f'{message} ({diagnostic})') from exc
 
             try:
                 if response.status != 'completed':
@@ -112,3 +114,40 @@ def review_chat(messages, api_key, budgets, ledger, policies, today):
                 raise ChatReviewError('OpenAI returned an incomplete review. Try again or use Manual review.') from exc
 
         return review_with_model(messages, budgets, ledger, policies, today, generate)
+
+
+
+def _openai_status_message(error):
+    status = error.status_code
+    code = error.code if isinstance(error.code, str) else ''
+    billing_messages = {
+        'credit_balance_exhausted': 'The OpenAI API organization has no prepaid credits left. Check API Billing.',
+        'project_spend_limit_exceeded': 'The OpenAI API project reached its spending limit. Check the project’s Limits settings.',
+        'organization_spend_limit_exceeded': 'The OpenAI API organization reached its spending limit. Check the organization’s Limits settings.',
+        'organization_usage_limit_exceeded': 'The OpenAI API organization reached its approved usage limit. Check the organization’s Limits settings.',
+    }
+    if code in billing_messages:
+        return billing_messages[code], None
+    if status == 402 or error.type == 'insufficient_quota' or code in (
+        'insufficient_quota', 'billing_hard_limit_reached', 'usage_limit_exceeded'
+    ):
+        return 'OpenAI has no available API credits or has reached a spending or usage limit. Check API Billing and Limits.', None
+    if status in (401, 403):
+        return 'OpenAI denied access. Check the API key and project permissions in Streamlit Secrets.', None
+    if status == 404:
+        return 'The OpenAI model is unavailable to this project. Check OPENAI_CHAT_MODEL.', None
+    if status != 429:
+        return 'OpenAI could not complete the review. Try again or use Manual review.', None
+
+    try:
+        retry_after = float(error.response.headers.get('retry-after', ''))
+    except ValueError:
+        retry_after = None
+
+    temporary = code in ('rate_limit_exceeded', 'slow_down') or error.type == 'rate_limit_error'
+    if temporary or (retry_after is not None and retry_after >= 0):
+        can_retry = (retry_after is not None and 0 <= retry_after <= 3
+                     and error.response.headers.get('x-should-retry') != 'false')
+        delay = retry_after if can_retry else None
+        return 'OpenAI temporarily limited the request rate. Wait before trying again, or use Manual review.', delay
+    return 'OpenAI rejected this review due to a usage limit. Check API credits and project limits before retrying.', None

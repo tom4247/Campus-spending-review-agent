@@ -5,12 +5,44 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from openai import RateLimitError
+
 from agent import review_chat
 from chat_review import ChatReviewError
 from review import load_records
 
 
 class OpenAIChatTests(unittest.TestCase):
+    def test_billing_and_spend_limits_are_identified_without_retry(self):
+        for code, kind, expected in (
+            ('credit_balance_exhausted', 'insufficient_quota', 'no prepaid credits left'),
+            ('project_spend_limit_exceeded', 'insufficient_quota', 'project reached its spending limit'),
+            (None, 'insufficient_quota', 'no available API credits'),
+        ):
+            with self.subTest(code=code), patch('openai.OpenAI') as client, patch('agent.sleep') as sleep:
+                create = client.return_value.__enter__.return_value.responses.create
+                response = SimpleNamespace(status_code=429, request=object(), headers={'retry-after': '1'})
+                create.side_effect = RateLimitError('private provider details', response=response,
+                                                    body={'code': code, 'type': kind})
+                with self.assertRaisesRegex(ChatReviewError, expected) as error:
+                    review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+                self.assertNotIn('private provider details', str(error.exception))
+                if code:
+                    self.assertIn(code, str(error.exception))
+                create.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_temporary_rate_limit_retries_once_when_the_wait_is_short(self):
+        with patch('openai.OpenAI') as client, patch('agent.sleep') as sleep:
+            create = client.return_value.__enter__.return_value.responses.create
+            response = SimpleNamespace(status_code=429, request=object(), headers={'retry-after': '2'})
+            create.side_effect = RateLimitError('temporary limit', response=response,
+                                                body={'code': 'slow_down', 'type': 'rate_limit_error'})
+            with self.assertRaisesRegex(ChatReviewError, 'temporarily limited the request rate'):
+                review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+            self.assertEqual(create.call_count, 2)
+            sleep.assert_called_once_with(2)
+
     def test_luna_uses_verified_evidence_and_can_escalate(self):
         fields = {
             'description': 'Van rental', 'purpose': 'Competition', 'amount': '450.00',
