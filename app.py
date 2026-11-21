@@ -5,9 +5,19 @@ import streamlit as st
 from dotenv import load_dotenv
 from review import load_records, budget_overview, PurchaseRequest, evaluate
 from agent import draft_request, explain
+from submission_log import record_submission
 
 load_dotenv()
 st.set_page_config(page_title='Campus Spending Review', page_icon='🎓', layout='wide')
+try:
+    # Accessing the secrets mapping also loads top-level Cloud secrets into the environment.
+    st.secrets.get('SUPABASE_URL')
+except FileNotFoundError:
+    pass
+supabase_url = os.getenv('SUPABASE_URL')
+supabase_key = os.getenv('SUPABASE_SECRET_KEY')
+logging_enabled = bool(supabase_url and supabase_key)
+
 st.title('Campus Spending Review')
 st.caption('A second look before your organization commits funds.')
 st.warning('Prototype · Mock financial data · Illustrative policies, not official CMU rules. Every result is a recommendation; a human treasurer makes the final decision.')
@@ -116,9 +126,19 @@ with st.form('request'):
         comments = st.text_area('Additional comments or justification', key='comments')
     from_ai = st.session_state.get('from_ai', False)
     confirmed = not from_ai or st.checkbox('I verified the spending category and date needed', key='confirm_draft')
+    if logging_enabled:
+        st.caption('Submitting saves your form entries in the project database. Use fictional details only.')
     submitted = st.form_submit_button('Review purchase', type='primary')
 
 if submitted:
+    if logging_enabled:
+        inputs = {field: st.session_state[field] for field in fields}
+        inputs['deadline'] = deadline.isoformat() if deadline else None
+        if record_submission(supabase_url, supabase_key, inputs):
+            st.caption('Submission saved.')
+        else:
+            st.warning('Could not confirm that this submission was saved. The review can still run.')
+
     if not description.strip():
         description_feedback.caption('Enter a purchase description.')
     if not purpose.strip():
