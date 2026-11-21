@@ -70,3 +70,25 @@ class GeminiReviewTests(unittest.TestCase):
         result = self.mock_review('DEFER', ['DEFER', 'ESCALATE'], None)
         self.assertEqual(result['decision'], 'DEFER')
         self.assertIn('Confirm the spending category.', result['evidence']['missing'])
+
+    def test_bad_request_identifies_the_key_or_project_issue_without_echoing_provider_message(self):
+        client_type = httpx.Client
+        for code, status, expected in (
+            ('API_KEY_INVALID', 'INVALID_ARGUMENT', 'rejected the Gemini API key'),
+            ('BILLING_DISABLED', 'FAILED_PRECONDITION', 'requires a project setup step'),
+        ):
+            with self.subTest(code=code), patch.dict(os.environ, {'GEMINI_MODEL': ''}):
+                response = httpx.Response(400, json={'error': {
+                    'status': status, 'details': [{'reason': code}], 'message': 'private test error',
+                }})
+
+                def make_client(**kwargs):
+                    return client_type(transport=httpx.MockTransport(lambda _: response), **kwargs)
+
+                with patch('gemini_review.httpx.Client', side_effect=make_client), self.assertLogs(level='WARNING') as logs:
+                    with self.assertRaisesRegex(GeminiReviewError, expected) as error:
+                        review_chat(self.messages, 'test-key', *self.records, self.today)
+                self.assertIn('request extraction, HTTP 400', str(error.exception))
+                self.assertIn(code, str(error.exception))
+                self.assertNotIn('private test error', str(error.exception))
+                self.assertNotIn('private test error', '\n'.join(logs.output))
