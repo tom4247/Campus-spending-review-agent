@@ -4,7 +4,7 @@ The agent reviews one proposed purchase at a time and returns **APPROVE**, **DEF
 
 The Team Smile project proposal gives the treasurer responsibility for authorizing actual spending. **APPROVE** completes the agent's review of a routine expense. The treasurer verifies the result before committing funds. **ESCALATE** sends a different signal: the request needs judgment or authority beyond the routine review, such as a budget transfer or an exception. The prototype uses synthetic data and illustrative policies.
 
-**Two ways to review:** Chat is the main interface and supports OpenAI or Gemini. Open **Manual review** for the rule-based form. See [Running the app](#running-the-app) for setup.
+**Two ways to review:** OpenAI chat is the main interface. Open **Manual review** for the rule-based form. See [Running the app](#running-the-app) for setup.
 
 ## How the agent handles an expense
 
@@ -138,7 +138,7 @@ The existing **11/12 (91.7%)** score covers the Python form review. Test the act
 
 ## Running the app
 
-Chat uses OpenAI or Gemini to choose recommendations. The manual fallback uses Python rules and works without an API key.
+OpenAI chooses recommendations in chat. The manual fallback uses Python rules and works without an API key.
 
 ### Current code layout
 
@@ -146,7 +146,6 @@ Chat uses OpenAI or Gemini to choose recommendations. The manual fallback uses P
 app.py                 Streamlit chat, purchase form, and budget overview
 chat_review.py          Shared request extraction and evidence-based decision workflow
 agent.py                OpenAI Responses API chat adapter
-gemini_review.py        Gemini API chat adapter
 review.py              Read-only CSV loading, validation, Decimal calculations, policy checks
 purchase_chat.py       Chat follow-ups, escalation summaries, and review records
 submission_log.py      Supabase writes for manual submissions and chat reviews
@@ -180,10 +179,9 @@ Add a key from a funded OpenAI API project and these top-level settings to **Str
 
 ```toml
 OPENAI_API_KEY = "your_actual_key"
-OPENAI_CHAT_ENABLED = true
 ```
 
-The default, `gpt-6-luna`, uses Standard rates and sets reasoning effort to `none`. The two responses per chat turn use structured output with a 512-token cap per response. Set `OPENAI_CHAT_MODEL` only if you want to use another model that supports structured outputs. OpenAI takes priority when enabled. With OpenAI off, Gemini can still be enabled with `GEMINI_API_KEY` and `GEMINI_CHAT_ENABLED = true`. [GPT-6 Luna pricing and capabilities](https://developers.openai.com/api/docs/models/gpt-6-luna)
+The default, `gpt-6-luna`, uses Standard rates and sets reasoning effort to `none`. The two responses per chat turn use structured output with a 512-token cap per response. Set `OPENAI_CHAT_MODEL` only if you want to use another model that supports structured outputs. The key enables chat by default. To pause it, set `OPENAI_CHAT_ENABLED = false`. [GPT-6 Luna pricing and capabilities](https://developers.openai.com/api/docs/models/gpt-6-luna)
 
 Open **Review a purchase in chat** and send: “Can we rent a $450 van from Example Van Rentals for our club competition tomorrow? Their quote is $450. Use the Travel budget.” Expect **ESCALATE** for the $150 shortfall. For a follow-up test, send a request with no vendor or quote and reply with the missing details. Choose **Start a new chat request** before reviewing a different purchase.
 
@@ -223,4 +221,4 @@ Each chat request gets one row in `purchase_reviews`. Follow-up replies update t
 python -m unittest -v
 ```
 
-Tests cover the budget and policy boundaries, record validation, the mocked OpenAI tool exchange, and the mocked OpenAI and Gemini chat flows. These tests verify that the model can escalate an affordable request and that the app rejects approval when a verified shortfall requires escalation. No API key is needed for tests.
+Tests cover the budget and policy boundaries, record validation, the mocked OpenAI tool exchange, and the mocked OpenAI chat flow. These tests verify that the model can escalate an affordable request and that the app rejects approval when a verified shortfall requires escalation. No API key is needed for tests.

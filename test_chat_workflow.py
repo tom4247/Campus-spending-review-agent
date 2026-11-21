@@ -6,36 +6,30 @@ from streamlit.testing.v1 import AppTest
 
 
 class ChatWorkflowTests(unittest.TestCase):
-    def test_streamlit_boolean_secret_enables_chat(self):
-        with patch.dict(os.environ, {'GEMINI_CHAT_ENABLED': 'false', 'GEMINI_API_KEY': ''}):
-            app = AppTest.from_file('app.py')
-            app.secrets['GEMINI_API_KEY'] = 'mock-key'
-            app.secrets['GEMINI_CHAT_ENABLED'] = True
-            app.run()
-            self.assertFalse(app.exception)
-            self.assertFalse(app.chat_input[0].disabled)
-
-    def test_openai_can_be_enabled_in_streamlit_secrets(self):
+    def test_openai_key_alone_enables_chat_in_streamlit_secrets(self):
         from chat_review import ChatReviewError
 
-        with patch('agent.review_chat', side_effect=ChatReviewError('Test OpenAI response')) as openai, patch(
-            'gemini_review.review_chat'
-        ) as gemini, patch.dict(os.environ, {'SUPABASE_URL': '', 'SUPABASE_SECRET_KEY': ''}):
+        with patch('agent.review_chat', side_effect=ChatReviewError('Test OpenAI response')) as model, patch.dict(
+            os.environ, {'SUPABASE_URL': '', 'SUPABASE_SECRET_KEY': ''}
+        ):
+            os.environ.pop('OPENAI_CHAT_ENABLED', None)
             app = AppTest.from_file('app.py')
             app.secrets['OPENAI_API_KEY'] = 'mock-key'
-            app.secrets['OPENAI_CHAT_ENABLED'] = True
-            app.secrets['GEMINI_API_KEY'] = 'mock-gemini-key'
-            app.secrets['GEMINI_CHAT_ENABLED'] = True
             app.run()
             self.assertFalse(app.chat_input[0].disabled)
             app.chat_input[0].set_value('A test van request').run()
             self.assertFalse(app.exception)
-            self.assertEqual(openai.call_args.args[0], [{'role': 'user', 'text': 'A test van request'}])
-            gemini.assert_not_called()
+            self.assertEqual(model.call_args.args[0], [{'role': 'user', 'text': 'A test van request'}])
             self.assertTrue(any('Test OpenAI response' in item.value for item in app.warning))
 
+    def test_missing_openai_key_keeps_chat_disabled(self):
+        with patch.dict(os.environ, {'OPENAI_API_KEY': '', 'OPENAI_CHAT_ENABLED': 'true'}):
+            app = AppTest.from_file('app.py').run()
+            self.assertFalse(app.exception)
+            self.assertTrue(app.chat_input[0].disabled)
+
     def test_follow_up_updates_the_same_review_and_exposes_a_handoff(self):
-        settings = {'GEMINI_CHAT_ENABLED': 'true', 'GEMINI_API_KEY': 'mock-key',
+        settings = {'OPENAI_CHAT_ENABLED': 'true', 'OPENAI_API_KEY': 'mock-key',
                     'SUPABASE_URL': 'https://example.supabase.co', 'SUPABASE_SECRET_KEY': 'sb_secret_mock'}
         request = {'description': 'Van rental', 'category': 'Travel', 'amount': '450.00', 'deadline': '2026-11-24'}
         evidence = {'category': 'Travel', 'amount': '450.00', 'available': '300.00', 'shortfall': '150.00',
@@ -47,7 +41,7 @@ class ChatWorkflowTests(unittest.TestCase):
         second = {'decision': 'ESCALATE', 'reason': 'Travel is $150 short.', 'follow_up': '',
                   'request': request, 'evidence': evidence}
 
-        with patch.dict(os.environ, settings), patch('gemini_review.review_chat', side_effect=[first, second]) as model, patch(
+        with patch.dict(os.environ, settings), patch('agent.review_chat', side_effect=[first, second]) as model, patch(
             'submission_log.save_review', return_value=True
         ) as save:
             app = AppTest.from_file('app.py').run()
@@ -73,7 +67,7 @@ class ChatWorkflowTests(unittest.TestCase):
             self.assertEqual(save.call_count, 4)
 
     def test_paused_chat_keeps_manual_review_available(self):
-        with patch.dict(os.environ, {'GEMINI_CHAT_ENABLED': 'false', 'GEMINI_API_KEY': 'mock-key',
+        with patch.dict(os.environ, {'OPENAI_CHAT_ENABLED': 'false', 'OPENAI_API_KEY': 'mock-key',
                                      'SUPABASE_URL': '', 'SUPABASE_SECRET_KEY': ''}):
             app = AppTest.from_file('app.py').run()
             self.assertFalse(app.exception)

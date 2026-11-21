@@ -46,3 +46,34 @@ class OpenAIChatTests(unittest.TestCase):
             with self.assertRaisesRegex(ChatReviewError, 'incomplete review'):
                 review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
             create.assert_called_once()
+
+    def test_openai_cannot_approve_a_verified_shortfall(self):
+        fields = {
+            'description': 'Van rental', 'purpose': 'Competition', 'amount': '450.00',
+            'category': 'Travel', 'deadline': '2026-11-24', 'vendor': 'Example Vans', 'quote': '$450',
+        }
+        with patch('openai.OpenAI') as client:
+            create = client.return_value.__enter__.return_value.responses.create
+            create.side_effect = [
+                SimpleNamespace(status='completed', output_text=json.dumps(fields)),
+                SimpleNamespace(status='completed', output_text='{"decision":"APPROVE","reason":"Approved","follow_up":""}'),
+            ]
+            with self.assertRaisesRegex(ChatReviewError, 'conflicted'):
+                review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+
+    def test_openai_defers_when_details_are_missing(self):
+        fields = {
+            'description': 'Van rental', 'purpose': 'Competition', 'amount': '',
+            'category': 'Travel', 'deadline': '2026-11-24', 'vendor': '', 'quote': '',
+        }
+        decision = {'decision': 'DEFER', 'reason': 'We need a quote.', 'follow_up': 'What did the vendor quote?'}
+        with patch('openai.OpenAI') as client:
+            create = client.return_value.__enter__.return_value.responses.create
+            create.side_effect = [
+                SimpleNamespace(status='completed', output_text=json.dumps(reply))
+                for reply in (fields, decision)
+            ]
+            result = review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+            self.assertEqual(result['decision'], 'DEFER')
+            self.assertEqual(result['follow_up'], decision['follow_up'])
+            self.assertIn('Provide vendor.', result['evidence']['missing'])

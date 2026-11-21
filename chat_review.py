@@ -1,4 +1,4 @@
-"""Shared budget evidence and policy checks for chat model providers."""
+"""Shared budget evidence and policy checks for the chat model."""
 from datetime import date
 
 from review import PurchaseRequest, review_evidence

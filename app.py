@@ -5,9 +5,8 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 from review import load_records, budget_overview, PurchaseRequest, evaluate
-from agent import review_chat as review_openai_chat
+from agent import review_chat
 from chat_review import ChatReviewError
-from gemini_review import review_chat
 from purchase_chat import build_reply, escalation_summary, review_snapshot
 from submission_log import record_submission, save_review
 
@@ -22,10 +21,8 @@ def setting(name, default=None):
         return fallback
 
 
-use_openai = str(setting('OPENAI_CHAT_ENABLED', 'false')).strip().lower() == 'true'
-provider = 'OpenAI' if use_openai else 'Gemini'
-api_key = setting('OPENAI_API_KEY' if use_openai else 'GEMINI_API_KEY')
-chat_requested = use_openai or str(setting('GEMINI_CHAT_ENABLED', 'false')).strip().lower() == 'true'
+api_key = setting('OPENAI_API_KEY')
+chat_requested = str(setting('OPENAI_CHAT_ENABLED', 'true')).strip().lower() == 'true'
 chat_enabled = chat_requested and isinstance(api_key, str) and bool(api_key.strip())
 supabase_url = setting('SUPABASE_URL')
 supabase_key = setting('SUPABASE_SECRET_KEY')
@@ -84,12 +81,12 @@ def display_chat_message(message):
 st.subheader('Review a purchase in chat')
 st.caption('Describe one purchase. You can reply with missing details or corrections.')
 if chat_enabled:
-    disclosure = f'Chat sends fictional purchase details to {provider} for review.'
+    disclosure = 'Chat sends fictional purchase details to OpenAI for review.'
     if logging_enabled:
         disclosure += ' The conversation and decision are saved in the project database.'
     st.caption(disclosure)
 elif chat_requested:
-    st.info('The selected chat provider needs an API key. Use Manual review below.')
+    st.info('OpenAI chat needs an API key. Use Manual review below.')
 else:
     st.info('Purchase chat is paused. Use Manual review below.')
 
@@ -119,10 +116,9 @@ with st.container():
             if logging_enabled:
                 save_review(supabase_url, supabase_key, review_snapshot(review_id, chat))
             try:
-                with st.spinner(f'{provider} is reviewing the request…'):
+                with st.spinner('OpenAI is reviewing the request…'):
                     conversation = [{'role': item['role'], 'text': item['text']} for item in chat if 'error' not in item]
-                    reviewer = review_openai_chat if use_openai else review_chat
-                    result = reviewer(conversation, api_key, budgets, ledger, policies, date.today())
+                    result = review_chat(conversation, api_key, budgets, ledger, policies, date.today())
                 reply = build_reply(result, policies['escalation_authority'])
             except ChatReviewError as exc:
                 reply = {'role': 'assistant', 'text': str(exc), 'error': True}

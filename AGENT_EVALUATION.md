@@ -1,6 +1,6 @@
 # Campus Spending Review Agent evaluation
 
-**Version under test:** chat-first reviewer with opt-in OpenAI support. Live OpenAI and Gemini decision quality remain unmeasured. See [Known weaknesses](KNOWN_WEAKNESSES.md) for observed failures and remaining risks.
+**Version under test:** chat-first reviewer using OpenAI GPT-6 Luna. Live decision quality remains unmeasured. See [Known weaknesses](KNOWN_WEAKNESSES.md) for observed failures and remaining risks.
 
 ## Results on the current version
 
@@ -59,14 +59,13 @@ Review date: 2026-11-17
 
 ### Offline regression suite
 
-Ran `python3 -m unittest -v` on November 20, 2026. **20/20 tests passed.** This is a software regression result. It does not score live extraction or recommendation quality.
+Ran `python3 -m unittest -v` on November 20, 2026. **17/17 tests passed.** This is a software regression result. It does not score live extraction or recommendation quality.
 
 | Coverage | Actual |
 |---|---|
 | Eight budget, policy, and validation tests plus one legacy OpenAI tool test | 9 passed |
-| Five Gemini tests with mocked API responses | 5 passed. Accepted a complete approval and a model-selected escalation for an affordable request, rejected an approval over budget, accepted a partial-request deferral, and surfaced key and billing errors. |
-| Two OpenAI tests with mocked API responses | 2 passed. Verified the GPT-6 Luna configuration, the $150 shortfall in the decision evidence, and failure handling for an incomplete response. |
-| Four Streamlit flow tests | 4 passed. Verified provider selection from Secrets, manual fallback, and a chat follow-up that updates one review ID and displays the $150 handoff. Model and database responses were mocked. |
+| Four OpenAI tests with mocked API responses | 4 passed. Verified the GPT-6 Luna configuration, the $150 shortfall, rejection of approval over budget, deferral for missing details, and incomplete-response handling. |
+| Four Streamlit flow tests | 4 passed. Verified activation from an OpenAI key in Secrets, the missing-key state, manual fallback, and a chat follow-up that updates one review ID and displays the $150 handoff. Model and database responses were mocked. |
 | Production Supabase check during deployment | Verified that `purchase_reviews` exists, row-level security is enabled, and the app role can insert and update the same review. The synthetic database test was rolled back. |
 
 ## Manual review baseline
@@ -155,7 +154,7 @@ The quote check accepts nonempty text. It does not extract the quoted amount or 
 
 ## Live chat test set
 
-These expectations are recorded before a live run. Use the repository's mock records and a reference date of November 17, 2026 unless noted. To replay the fixed dates, call `review_chat` in `agent.py` for OpenAI or `gemini_review.py` for Gemini with the case date and `load_records()`. For a later Streamlit run, use reconciled test records and adjust deadlines to preserve the intended urgency. Also verify the handoff and saved review ID in Streamlit and Supabase. In the multi-turn case, reply in the same chat after the follow-up question.
+These expectations are recorded before a live run. Use the repository's mock records and a reference date of November 17, 2026 unless noted. To replay the fixed dates, call `review_chat` in `agent.py` with the case date and `load_records()`. For a later Streamlit run, use reconciled test records and adjust deadlines to preserve the intended urgency. Also verify the handoff and saved review ID in Streamlit and Supabase. In the multi-turn case, reply in the same chat after the follow-up question.
 
 A case is a **hit** when all listed outcomes match, available funds and shortfall match where applicable, and the reply includes the listed reason or next action. A failed call on a case requiring a decision counts as a miss. Pass at **90% or higher** across the 14 cases, with every mandatory escalation matched and zero approvals for requests that exceed available funds or violate a configured rule.
 
@@ -176,7 +175,7 @@ A case is a **hit** when all listed outcomes match, available funds and shortfal
 | C13 | “We need a van for competition travel on November 24. Use Travel.” Reply: “Example Van Rentals quoted $450 total.” | DEFER → ESCALATE | First ask for missing details. After the reply, show $300 available and a $150 shortfall. Both turns update one review ID. | Pending |
 | C14 | “Charge a $400 projector from Campus AV to Events for club presentations on November 24. The quote is $400.” | DEFER or ESCALATE | Flag the category disagreement and the potential Equipment restriction. DEFER is acceptable while the category is unresolved. ESCALATE is expected if the request is interpreted as Equipment. | Pending |
 
-**Live result:** 0 of 14 executed with GPT-6 Luna. Its hit rate is unmeasured. The earlier hosted Gemini attempt failed at request extraction with the following response.
+**Live result:** 0 of 14 executed with GPT-6 Luna. Its hit rate is unmeasured. In the earlier Gemini deployment, a hosted attempt failed at request extraction with the following response.
 
 ```text
 Google requires a project setup step. Check the Gemini project’s status and billing in Google AI Studio. (request extraction, HTTP 402 · RESOURCE_EXHAUSTED)

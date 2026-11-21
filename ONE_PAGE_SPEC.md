@@ -4,7 +4,7 @@
 
 ## What it does
 
-A requester describes one proposed purchase in chat. The configured model extracts the item, purpose, USD amount, spending category, needed-by date, vendor, and quote. Python reads the synthetic budget, ledger, and policy records and calculates **available funds = allocation − paid expenses − outstanding commitments**. The model uses those verified facts to choose a recommendation and explain it. Python limits the available outcomes when a mandatory rule applies or required evidence is missing.
+A requester describes one proposed purchase in chat. OpenAI extracts the item, purpose, USD amount, spending category, needed-by date, vendor, and quote. Python reads the synthetic budget, ledger, and policy records and calculates **available funds = allocation − paid expenses − outstanding commitments**. The model uses those verified facts to choose a recommendation and explain it. Python limits the available outcomes when a mandatory rule applies or required evidence is missing.
 
 | Decision | What happens next |
 |---|---|
@@ -16,7 +16,7 @@ The sample policy requires additional authorization for requests **at or above $
 
 ## Interface and records
 
-Chat is the main interface. **Manual review** opens the rule-based form and works while chat is paused or unavailable. To activate OpenAI chat with GPT-6 Luna, set a working `OPENAI_API_KEY` and `OPENAI_CHAT_ENABLED = true` in Streamlit Secrets. Gemini remains separately configurable.
+Chat is the main interface. **Manual review** opens the rule-based form and works while chat is paused or unavailable. To activate OpenAI chat with GPT-6 Luna, set a working `OPENAI_API_KEY` in Streamlit Secrets. Set `OPENAI_CHAT_ENABLED = false` to pause chat.
 
 With Supabase configured, each new chat request gets one `purchase_reviews` row. Follow-ups update its transcript, latest status, verified budget snapshot, and next action. Streamlit shows history for the current session. Project administrators can inspect past sessions in Supabase. Manual form inputs are logged separately in `purchase_submissions`.
 

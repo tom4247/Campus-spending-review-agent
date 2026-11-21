@@ -1,6 +1,6 @@
 # Known weaknesses
 
-**Version:** Chat-first reviewer with opt-in OpenAI support. Review recommendations are advisory. The treasurer or another authorized reviewer makes the final spending decision.
+**Version:** Chat-first reviewer using OpenAI GPT-6 Luna. Review recommendations are advisory. The treasurer or another authorized reviewer makes the final spending decision.
 
 ## Reproduced on the current manual reviewer
 
@@ -22,13 +22,13 @@ For the first four probes, the reason was:
 
 | Weakness | What it means for the current version |
 |---|---|
-| **Chat depends on API access.** | The earlier Gemini attempt returned HTTP 402. OpenAI is available when the owner enables it with a funded API key. **Manual review** works without either provider. Live accuracy is still unmeasured. |
+| **Chat depends on API access.** | OpenAI chat requires a funded API key. **Manual review** works without an API key. Live accuracy is still unmeasured. |
 | **Checks depend on how the model interprets the request.** | Python enforces spending rules against the extracted amount and category. It cannot independently establish that the extraction is correct. Ambiguous dates, split costs, wrong categories, and corrections need live testing. |
 | **Quote and vendor evidence is unverified.** | The model is instructed to ask about inconsistent quotes or categories. The chat path has no independent quote-total comparison, document verification, or vendor check. Treat these as model-dependent behaviors until the live cases are run. |
 | **The explanation is generated.** | Structured validation checks the outcome and requires a reason and a follow-up for DEFER. It does not validate every wording or claim. Compare the rationale with the verified figures and policy checks. |
 | **One purchase per conversation.** | Follow-ups reuse the same review ID and all previous turns. Start a new chat for a different purchase so the model does not mix details and update the earlier review. |
 | **Each turn depends on two model calls.** | A slow or failed extraction or decision can leave the request unavailable. The app shows the error and offers Manual review. |
-| **Chat text leaves the browser session.** | Chat sends the conversation to the selected provider and, when configured, saves it in Supabase. The public demo is intended for fictional data. |
+| **Chat text leaves the browser session.** | Chat sends the conversation to OpenAI and, when configured, saves it in Supabase. The public demo is intended for fictional data. |
 
 ## Budget, authorization, and workflow
 
