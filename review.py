@@ -86,15 +86,24 @@ class PurchaseRequest:
     comments: str = ''
 
 
-def evaluate(request, budgets, ledger, policies, today=None):
-    today = today or date.today()
-    amount = money(request.amount)
-    if amount <= 0:
-        raise ValueError('Requested amount must be greater than zero.')
+def review_evidence(request, budgets, ledger, policies, today, *, allow_incomplete=False):
+    missing, escalate, applied = [], [], []
+    try:
+        amount = money(request.amount)
+        if amount <= 0:
+            raise ValueError('Requested amount must be greater than zero.')
+    except ValueError:
+        if not allow_incomplete:
+            raise
+        amount = None
+        missing.append('Provide the requested amount as a positive USD total.')
+
     row = next((r for r in budget_overview(budgets, ledger) if r['category'] == request.category), None)
     if row is None:
-        raise ValueError('Select a known spending category.')
-    missing, escalate, applied = [], [], []
+        if not allow_incomplete:
+            raise ValueError('Select a known spending category.')
+        missing.append('Confirm the spending category.')
+
     for field in ('description', 'purpose', 'vendor'):
         if not getattr(request, field).strip():
             missing.append(f'Provide {field}.')
@@ -106,16 +115,25 @@ def evaluate(request, budgets, ledger, policies, today=None):
         missing.append('Provide the date needed.')
     elif request.deadline < today:
         missing.append('Confirm a new deadline; the supplied date has passed.')
-    age = (today - row['verified_on']).days
     applied.append(f"Records must be verified within {policies['max_record_age_days']} days.")
-    if age < 0 or age > policies['max_record_age_days']:
-        missing.append(f"Verify category records: recorded verification date is {row['verified_on']}.")
-    shortfall = max(Decimal(0), amount - row['available'])
+    balance = {}
+    if row is not None:
+        age = (today - row['verified_on']).days
+        if age < 0 or age > policies['max_record_age_days']:
+            missing.append(f"Verify category records: recorded verification date is {row['verified_on']}.")
+        balance = {key: f"{row[key]:.2f}" for key in ('allocation', 'paid', 'committed', 'available')}
+        balance['verified_on'] = str(row['verified_on'])
+
+    shortfall = None
+    if row is not None and amount is not None:
+        after_purchase = row['available'] - amount
+        shortfall = max(Decimal(0), -after_purchase)
+        balance.update(after_purchase=f'{after_purchase:.2f}', shortfall=f'{shortfall:.2f}')
     applied.append('Requested spending must fit available category funds after commitments.')
     if shortfall:
         escalate.append(f'Insufficient funds: shortfall ${shortfall:,.2f}.')
     applied.append(f"Requests at or above ${policies['approval_threshold']:,.2f} require additional authorization.")
-    if amount >= policies['approval_threshold']:
+    if amount is not None and amount >= policies['approval_threshold']:
         escalate.append('Request meets the additional authorization threshold.')
     restriction = policies['restricted_categories'].get(request.category)
     if restriction:
@@ -124,18 +142,23 @@ def evaluate(request, budgets, ledger, policies, today=None):
     urgent = request.deadline is not None and 0 <= (request.deadline - today).days <= policies['urgent_within_days']
     if urgent and missing:
         escalate.append('The urgent deadline requires prompt human review of unresolved information.')
+    return {
+        **balance, 'category': request.category, 'amount': f'{amount:.2f}' if amount is not None else None,
+        'reviewed_on': str(today), 'deadline': str(request.deadline) if request.deadline else None,
+        'urgent': urgent, 'missing': missing, 'escalation_reasons': escalate,
+        'rules': applied, 'policy_label': policies['label'],
+    }
+
+
+def evaluate(request, budgets, ledger, policies, today=None):
+    evidence = review_evidence(request, budgets, ledger, policies, today or date.today())
+    escalate = evidence.pop('escalation_reasons')
+    missing = evidence['missing']
     decision = 'ESCALATE' if escalate else 'DEFER' if missing else 'APPROVE'
     reasons = escalate + missing or ['Available funds are sufficient, required fields are complete, and configured checks pass.']
     steps = ([f"Contact {policies['escalation_authority']} before committing funds."] if escalate else
              ['Resolve missing information and rerun the review.'] if missing else
              ['Treasurer: verify supporting documents and make the final spending decision.'])
-    if urgent:
+    if evidence['urgent']:
         steps.append(f'Prioritize review before the {request.deadline} deadline.')
-    return {'decision': decision, 'category': request.category, 'amount': f'{amount:.2f}',
-            'allocation': f"{row['allocation']:.2f}", 'paid': f"{row['paid']:.2f}",
-            'committed': f"{row['committed']:.2f}", 'available': f"{row['available']:.2f}",
-            'after_purchase': f"{row['available'] - amount:.2f}", 'shortfall': f'{shortfall:.2f}',
-            'verified_on': str(row['verified_on']), 'reviewed_on': str(today),
-            'deadline': str(request.deadline) if request.deadline else None,
-            'urgent': urgent, 'reasons': reasons, 'missing': missing, 'rules': applied,
-            'next_steps': steps, 'policy_label': policies['label']}
+    return {**evidence, 'decision': decision, 'reasons': reasons, 'next_steps': steps}

@@ -5,6 +5,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from review import load_records, budget_overview, PurchaseRequest, evaluate
 from agent import draft_request, explain
+from gemini_review import GeminiReviewError, review_chat
 from submission_log import record_submission
 
 load_dotenv()
@@ -17,6 +18,7 @@ except FileNotFoundError:
 supabase_url = os.getenv('SUPABASE_URL')
 supabase_key = os.getenv('SUPABASE_SECRET_KEY')
 logging_enabled = bool(supabase_url and supabase_key)
+gemini_key = os.getenv('GEMINI_API_KEY')
 
 st.title('Campus Spending Review')
 st.caption('A second look before your organization commits funds.')
@@ -32,6 +34,85 @@ try:
 except (OSError, ValueError, KeyError, TypeError) as exc:
     st.error(f'Data needs verification. Review is unavailable: {exc}')
     st.stop()
+
+
+def display_chat_message(message):
+    with st.chat_message(message['role']):
+        if 'text' in message:
+            st.text(message['text'])
+            if message.get('saved') is False:
+                st.caption('Could not confirm that this message was saved to Supabase.')
+            return
+        if 'error' in message:
+            st.warning(message['error'])
+            return
+
+        result = message['result']
+        decision = result['decision']
+        heading = {
+            'APPROVE': 'APPROVE · Ready for treasurer review',
+            'DEFER': 'DEFER · More information needed',
+            'ESCALATE': 'ESCALATE · Human review required',
+        }[decision]
+        st.markdown(f'**{heading}**')
+        st.text(result['reason'])
+        if decision == 'ESCALATE':
+            st.text(f"Contact {policies['escalation_authority']} before committing funds.")
+        elif decision == 'DEFER':
+            st.caption('Reply with any missing or corrected details.')
+
+        with st.expander('Verified checks and interpreted request'):
+            evidence = result['evidence']
+            if 'available' in evidence:
+                st.text(f"{evidence['category']} available: ${Decimal(evidence['available']):,.2f}")
+            if 'shortfall' in evidence:
+                st.text(f"Shortfall: ${Decimal(evidence['shortfall']):,.2f}")
+            for item in evidence['escalation_reasons'] + evidence['missing']:
+                st.text(item)
+            st.markdown('**Policy checks**')
+            for rule in evidence['rules']:
+                st.text(rule)
+            st.table([{'Field': field.capitalize(), 'Value': value or 'Missing'}
+                      for field, value in result['request'].items()])
+
+
+st.subheader('Review a purchase in chat')
+st.caption('Describe one purchase. Include its purpose, amount, vendor, quote and needed-by date when you have them.')
+if gemini_key:
+    st.caption('Chat messages go to Gemini for review. Use fictional purchase details.')
+    if logging_enabled:
+        st.caption('Submitted chat messages are saved in the project database.')
+else:
+    st.info('Chat is available once the app owner sets GEMINI_API_KEY. You can still use the purchase form below.')
+
+with st.container():
+    chat = st.session_state.setdefault('purchase_chat', [])
+    if chat and st.button('Start a new chat request'):
+        chat.clear()
+
+    history = st.container()
+    with history:
+        for message in chat:
+            display_chat_message(message)
+
+    prompt = st.chat_input('Describe your purchase or add missing details', max_chars=2000,
+                           key='purchase_chat_input', disabled=not gemini_key)
+    if prompt and prompt.strip():
+        message = {'role': 'user', 'text': prompt.strip()}
+        if logging_enabled:
+            message['saved'] = record_submission(supabase_url, supabase_key, {'source': 'chat', 'message': message['text']})
+        chat.append(message)
+        with history:
+            display_chat_message(message)
+            try:
+                with st.spinner('Gemini is reviewing the request…'):
+                    messages = [item['text'] for item in chat if item['role'] == 'user']
+                    result = review_chat(messages, gemini_key, budgets, ledger, policies, date.today())
+                reply = {'role': 'assistant', 'result': result}
+            except GeminiReviewError as exc:
+                reply = {'role': 'assistant', 'error': str(exc)}
+            chat.append(reply)
+            display_chat_message(reply)
 
 st.subheader('Budget Overview')
 overview = budget_overview(budgets, ledger)

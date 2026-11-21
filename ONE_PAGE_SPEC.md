@@ -1,32 +1,32 @@
 # Campus Organization Spending Review Agent
 
-**One-page specification | Target design**
+**One-page specification | Chat spending review**
 
-## Decision and authority
+## What the agent decides
 
-The **OpenAI model selects the purchase recommendation** after reviewing the request, verified financial facts, and configured policy. It chooses **APPROVE**, **DEFER**, or **ESCALATE** and explains why. Python calculates financial facts, validates records, and checks that the model's output is safe to display. The treasurer or designated reviewer makes the final spending decision.
+The **Gemini chat agent reviews one proposed expense at a time and returns APPROVE, DEFER, or ESCALATE**. An APPROVE completes the agent's routine review. Under the project proposal, the treasurer verifies the result and authorizes spending before committing funds. An ESCALATE identifies the person or body that can resolve an exception or give additional approval.
 
-## Inputs and decision flow
+## Inputs and workflow
 
-1. A requester submits a purchase description, purpose, USD amount, category, needed-by date, vendor, and quote or estimate. A natural-language draft is optional. The requester confirms extracted details.
-2. Python validates the submission and reads the mock budgets, ledger, and policies. It calculates available funds as **allocation − paid expenses − outstanding commitments**, plus the projected balance and any shortfall.
-3. OpenAI receives the relevant request details and uses a read-only tool to retrieve the verified facts and applicable policy. It returns a structured recommendation with reasons, supporting evidence, and the next action.
-4. Streamlit validates and displays the recommendation alongside the underlying facts. If the model call fails or its response violates a mandatory rule, the app displays **Review unavailable** and directs the requester to a human reviewer.
+1. A member describes the purchase in chat, including the purpose, total, vendor, quote, and deadline when available. Gemini extracts the details, and the member can clarify them in a follow-up message.
+2. Python validates the source records and prepares verified facts from the synthetic budgets, ledger, and spending rules. Available funds equal **allocation − paid expenses − outstanding commitments**.
+3. Gemini receives the verified evidence and selects an outcome with a concise reason. Required escalations and unresolved required fields constrain the outcomes the app accepts.
+4. Streamlit displays the accepted outcome and calculation. Invalid model output, unavailable evidence, and service failures surface **Review unavailable** with a human review path.
 
 ## Outcomes
 
-| Model recommendation | Meaning | Next action |
+| Agent decision | When it applies | Next action |
 |---|---|---|
-| **APPROVE** | The request is ready for treasurer review. Funds are sufficient, the evidence is complete, and applicable rules are satisfied. | Treasurer verifies the request and decides whether to authorize spending. |
-| **DEFER** | The requester can resolve missing or conflicting information, or the treasurer needs to reconcile stale records. | Resolve the named issue and resubmit. |
-| **ESCALATE** | A shortfall, restriction, authorization threshold, urgency with an unresolved issue, or policy ambiguity calls for human judgment. | Send the review summary to the named advisor or designated financial reviewer before committing funds. |
+| **APPROVE** | The expense fits the verified budget, required evidence is complete, and applicable rules are satisfied. | Proceed to routine treasurer verification and authorization. |
+| **DEFER** | A missing quote, conflicting amount, uncertain category, or stale record needs clarification and can be resolved before the deadline. | Resolve the named issue and resubmit. |
+| **ESCALATE** | A shortfall, restriction, threshold, policy ambiguity, or urgent unresolved issue requires human judgment. | Share the review summary with the authorized advisor or designated financial reviewer. |
 
-Configured escalation takes precedence over deferral. The sample policy uses an inclusive $1,000 threshold, requires advisor authorization for Equipment, treats today and tomorrow as urgent, and requires records verified within 14 days. These policies are illustrative.
+A $450 Travel van rental with $300 available after commitments has a $150 shortfall. The agent should return **ESCALATE** and explain who can review a possible transfer or supplemental funding. The mock policies include an inclusive $1,000 authorization threshold, extra authorization for Equipment, and a 14-day record freshness limit.
 
-## Boundaries and evaluation
+## Scope and evaluation
 
-The model can read the evidence needed for review. It has no authority to spend, approve on behalf of the organization, change records, or grant exceptions. The first handoff is manual. Streamlit provides the contact or role and a summary the requester can share. Missing credentials or failed validation leave the recommendation unavailable and the human review path visible.
+The agent issues the review decision. The organization's authorized people handle orders, payments, changes to the budget, and policy exceptions. Escalation handoff is manual. The prototype uses synthetic records and illustrative spending policies.
 
-Acceptance tests cover recommendation accuracy, mandatory escalation, quote and category ambiguity, evidence grounding, and failure handling. The existing 12-case evaluation measures the current Python decision engine. The model-led design requires a new evaluation run.
+Evaluate at least 10 synthetic cases with expected outcomes and balances recorded in advance. Check the decision, available-funds calculation, and supporting explanation. Flag missing or conflicting evidence. Any approval that exceeds available funds or violates a stated rule fails the proposal's safety criterion.
 
-**Implementation status:** The current code still selects recommendations in Python. OpenAI optionally drafts requests and explains decisions. The README documents the model-led architecture and migration.
+**Implementation status:** Set `GEMINI_API_KEY` to enable chat. The separate purchase form uses Python to select outcomes, with optional OpenAI drafting and explanations. The existing 12-case evaluation measures the Python baseline.
