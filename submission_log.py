@@ -1,4 +1,4 @@
-"""Store submitted purchase form inputs through the Supabase Data API."""
+"""Store purchase submissions and chat review snapshots through Supabase."""
 import json
 import logging
 import re
@@ -6,7 +6,14 @@ from http.client import HTTPException, HTTPSConnection
 
 
 def record_submission(project_url, secret_key, inputs):
-    """Return whether Supabase confirmed the insert."""
+    return _write(project_url, secret_key, 'purchase_submissions', {'inputs': inputs})
+
+
+def save_review(project_url, secret_key, snapshot):
+    return _write(project_url, secret_key, 'purchase_reviews', snapshot, upsert=True)
+
+
+def _write(project_url, secret_key, table, row, *, upsert=False):
     if not isinstance(project_url, str) or not isinstance(secret_key, str):
         logging.warning('Invalid Supabase submission log configuration.')
         return False
@@ -18,19 +25,20 @@ def record_submission(project_url, secret_key, inputs):
 
     connection = HTTPSConnection(project.group(1), timeout=4)
     try:
+        preference = 'resolution=merge-duplicates,return=minimal' if upsert else 'return=minimal'
         connection.request(
-            'POST', '/rest/v1/purchase_submissions',
-            body=json.dumps({'inputs': inputs}),
+            'POST', f'/rest/v1/{table}',
+            body=json.dumps(row),
             headers={
                 'apikey': secret_key,
                 'Content-Type': 'application/json',
-                'Prefer': 'return=minimal',
+                'Prefer': preference,
             },
         )
         status = connection.getresponse().status
-        if status == 201:
+        if status in (200, 201, 204):
             return True
-        logging.warning('Supabase submission insert returned HTTP %d.', status)
+        logging.warning('Supabase write to %s returned HTTP %d.', table, status)
     except (OSError, HTTPException, ValueError):
         logging.warning('The Supabase submission log request failed.')
     finally:

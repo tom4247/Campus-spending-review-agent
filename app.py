@@ -1,12 +1,13 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from uuid import uuid4
 import os
 import streamlit as st
 from dotenv import load_dotenv
 from review import load_records, budget_overview, PurchaseRequest, evaluate
-from agent import draft_request, explain
 from gemini_review import GeminiReviewError, review_chat
-from submission_log import record_submission
+from purchase_chat import build_reply, escalation_summary, review_snapshot
+from submission_log import record_submission, save_review
 
 load_dotenv()
 st.set_page_config(page_title='Campus Spending Review', page_icon='🎓', layout='wide')
@@ -19,15 +20,11 @@ supabase_url = os.getenv('SUPABASE_URL')
 supabase_key = os.getenv('SUPABASE_SECRET_KEY')
 logging_enabled = bool(supabase_url and supabase_key)
 gemini_key = os.getenv('GEMINI_API_KEY')
+chat_enabled = bool(gemini_key) and os.getenv('GEMINI_CHAT_ENABLED', 'false').lower() == 'true'
 
 st.title('Campus Spending Review')
 st.caption('A second look before your organization commits funds.')
 st.warning('Prototype · Mock financial data · Illustrative policies, not official CMU rules. Every result is a recommendation; a human treasurer makes the final decision.')
-with st.sidebar:
-    st.header('Review settings')
-    use_ai = st.toggle('Add OpenAI explanation', value=False)
-    st.caption('When enabled, verified financial summaries and policy results are sent to OpenAI. Purchase free text and API keys are not included in that summary.')
-    st.caption('Read-only: this app cannot change budgets, approve purchases, or make payments.')
 
 try:
     budgets, ledger, policies = load_records()
@@ -38,13 +35,12 @@ except (OSError, ValueError, KeyError, TypeError) as exc:
 
 def display_chat_message(message):
     with st.chat_message(message['role']):
-        if 'text' in message:
+        if message['role'] == 'user':
             st.text(message['text'])
-            if message.get('saved') is False:
-                st.caption('Could not confirm that this message was saved to Supabase.')
             return
         if 'error' in message:
-            st.warning(message['error'])
+            st.warning(message['text'])
+            st.caption('Use Manual review to continue without Gemini.')
             return
 
         result = message['result']
@@ -55,11 +51,11 @@ def display_chat_message(message):
             'ESCALATE': 'ESCALATE · Human review required',
         }[decision]
         st.markdown(f'**{heading}**')
-        st.text(result['reason'])
+        st.text(message['text'])
+        st.text(message['next_action'])
         if decision == 'ESCALATE':
-            st.text(f"Contact {policies['escalation_authority']} before committing funds.")
-        elif decision == 'DEFER':
-            st.caption('Reply with any missing or corrected details.')
+            with st.expander('Escalation summary to share'):
+                st.code(escalation_summary(message), language='text')
 
         with st.expander('Verified checks and interpreted request'):
             evidence = result['evidence']
@@ -77,18 +73,22 @@ def display_chat_message(message):
 
 
 st.subheader('Review a purchase in chat')
-st.caption('Describe one purchase. Include its purpose, amount, vendor, quote and needed-by date when you have them.')
-if gemini_key:
-    st.caption('Chat messages go to Gemini for review. Use fictional purchase details.')
+st.caption('Describe one purchase. You can reply with missing details or corrections.')
+if chat_enabled:
+    disclosure = 'Chat sends fictional purchase details to Gemini for review.'
     if logging_enabled:
-        st.caption('Submitted chat messages are saved in the project database.')
+        disclosure += ' The conversation and decision are saved in the project database.'
+    st.caption(disclosure)
 else:
-    st.info('Chat is available once the app owner sets GEMINI_API_KEY. You can still use the purchase form below.')
+    st.info('Gemini chat is paused. Use Manual review below.')
 
 with st.container():
-    chat = st.session_state.setdefault('purchase_chat', [])
+    chat = st.session_state.setdefault('expense_review_chat', [])
+    saved_reviews = st.session_state.setdefault('chat_review_history', {})
     if chat and st.button('Start a new chat request'):
         chat.clear()
+        st.session_state.pop('purchase_review_id', None)
+        st.session_state.pop('chat_save_failed', None)
 
     history = st.container()
     with history:
@@ -96,36 +96,59 @@ with st.container():
             display_chat_message(message)
 
     prompt = st.chat_input('Describe your purchase or add missing details', max_chars=2000,
-                           key='purchase_chat_input', disabled=not gemini_key)
+                           key='purchase_chat_input', disabled=not chat_enabled)
     if prompt and prompt.strip():
+        if 'purchase_review_id' not in st.session_state:
+            st.session_state['purchase_review_id'] = str(uuid4())
+        review_id = st.session_state['purchase_review_id']
         message = {'role': 'user', 'text': prompt.strip()}
-        if logging_enabled:
-            message['saved'] = record_submission(supabase_url, supabase_key, {'source': 'chat', 'message': message['text']})
         chat.append(message)
         with history:
             display_chat_message(message)
+            if logging_enabled:
+                save_review(supabase_url, supabase_key, review_snapshot(review_id, chat))
             try:
                 with st.spinner('Gemini is reviewing the request…'):
-                    messages = [item['text'] for item in chat if item['role'] == 'user']
-                    result = review_chat(messages, gemini_key, budgets, ledger, policies, date.today())
-                reply = {'role': 'assistant', 'result': result}
+                    conversation = [{'role': item['role'], 'text': item['text']} for item in chat if 'error' not in item]
+                    result = review_chat(conversation, gemini_key, budgets, ledger, policies, date.today())
+                reply = build_reply(result, policies['escalation_authority'])
             except GeminiReviewError as exc:
-                reply = {'role': 'assistant', 'error': str(exc)}
+                reply = {'role': 'assistant', 'text': str(exc), 'error': True}
             chat.append(reply)
+            snapshot = review_snapshot(review_id, chat)
+            saved_reviews[review_id] = snapshot
+            if logging_enabled:
+                st.session_state['chat_save_failed'] = not save_review(supabase_url, supabase_key, snapshot)
             display_chat_message(reply)
 
-st.subheader('Budget Overview')
-overview = budget_overview(budgets, ledger)
-cols = st.columns(3)
-for col, key, label in zip(cols, ['allocation', 'committed', 'available'], ['Total allocated', 'Outstanding commitments', 'Available across categories']):
-    col.metric(label, f"${sum(r[key] for r in overview):,.2f}")
-st.caption('Category restrictions apply; totals do not imply funds can be transferred between categories.')
-st.dataframe([{'Category': r['category'], 'Allocation': f"${r['allocation']:,.2f}",
-    'Paid expenses': f"${r['paid']:,.2f}", 'Commitments': f"${r['committed']:,.2f}",
-    'Available': f"${r['available']:,.2f}", 'Verified on': str(r['verified_on'])} for r in overview], hide_index=True, width='stretch')
-if any((date.today() - r['verified_on']).days not in range(policies['max_record_age_days'] + 1) for r in overview):
-    st.warning('Some records are stale or future-dated. Requests in those categories require verification.')
-with st.expander('Illustrative policies and source records'):
+    if st.session_state.get('chat_save_failed'):
+        st.warning('Could not confirm that the latest review was saved to Supabase.')
+
+if saved_reviews:
+    with st.expander('Review history for this session'):
+        rows = []
+        for snapshot in reversed(saved_reviews.values()):
+            review = snapshot['review']
+            request = review['result']['request'] if review else {}
+            rows.append({
+                'Purchase': request.get('description') or snapshot['transcript'][0]['text'],
+                'Decision': snapshot['status'],
+                'Next action': review['next_action'] if review else 'Retry chat or use Manual review.',
+            })
+        st.dataframe(rows, hide_index=True, width='stretch')
+
+with st.expander('Budget records and spending rules'):
+    st.subheader('Budget Overview')
+    overview = budget_overview(budgets, ledger)
+    cols = st.columns(3)
+    for col, key, label in zip(cols, ['allocation', 'committed', 'available'], ['Total allocated', 'Outstanding commitments', 'Available across categories']):
+        col.metric(label, f"${sum(r[key] for r in overview):,.2f}")
+    st.caption('Category restrictions apply; totals do not imply funds can be transferred between categories.')
+    st.dataframe([{'Category': r['category'], 'Allocation': f"${r['allocation']:,.2f}",
+        'Paid expenses': f"${r['paid']:,.2f}", 'Commitments': f"${r['committed']:,.2f}",
+        'Available': f"${r['available']:,.2f}", 'Verified on': str(r['verified_on'])} for r in overview], hide_index=True, width='stretch')
+    if any((date.today() - r['verified_on']).days not in range(policies['max_record_age_days'] + 1) for r in overview):
+        st.warning('Some records are stale or future-dated. Requests in those categories require verification.')
     st.caption(policies['label'])
     st.markdown(rf"- **Additional authorization** · Required for requests of \${policies['approval_threshold']:,.2f} or more.")
     st.markdown(f"- **Record verification** · Category records must have been verified within {policies['max_record_age_days']} days.")
@@ -141,6 +164,9 @@ with st.expander('Illustrative policies and source records'):
     st.dataframe([{**r, 'amount': str(r['amount'])} for r in ledger], hide_index=True)
     st.caption('Edit local files in data/ to configure the prototype. Verification dates mean the entire category ledger has been reconciled, including outstanding commitments.')
 
+if not st.toggle('Manual review', value=not chat_enabled):
+    st.stop()
+
 st.subheader('Purchase request')
 categories = [row['category'] for row in budgets]
 today = date.today()
@@ -148,13 +174,10 @@ date_min, date_max = date(1900, 1, 1), date(2100, 12, 31)
 fields = ('description', 'purpose', 'amount', 'category', 'deadline', 'vendor', 'quote', 'comments')
 
 
-def fill_request(values, *, from_ai=False):
+def fill_request(values):
     for field in fields:
         st.session_state[field] = values.get(field) or (None if field in ('deadline', 'category') else '')
-    st.session_state['confirm_draft'] = False
-    st.session_state['from_ai'] = from_ai
-    for key in ('review', 'ai_text', 'ai_error'):
-        st.session_state.pop(key, None)
+    st.session_state.pop('review', None)
 
 
 sample = dict(description='Van rental', purpose='Transportation to a student organization event',
@@ -162,29 +185,6 @@ sample = dict(description='Van rental', purpose='Transportation to a student org
               deadline=today + timedelta(days=1), vendor='Example Van Rentals',
               quote='Estimated rental cost: $450')
 st.button('Try a sample request', on_click=fill_request, args=(sample,))
-
-with st.expander('Draft with AI'):
-    st.caption('Drafting sends the text you enter here to OpenAI.')
-    description_text = st.text_area('Describe your purchase', placeholder='We need a $450 van for Saturday.')
-    if st.button('Draft request'):
-        if not description_text.strip():
-            st.info('Enter a purchase description to create a draft.')
-        elif not os.getenv('OPENAI_API_KEY'):
-            st.info('AI drafting requires an OpenAI API key. You can fill in the form below.')
-        else:
-            try:
-                with st.spinner('Drafting request…'):
-                    draft = draft_request(description_text.strip(), categories, today)
-                try:
-                    deadline = date.fromisoformat(draft.get('deadline') or '')
-                    draft['deadline'] = deadline if date_min <= deadline <= date_max else None
-                except ValueError:
-                    draft['deadline'] = None
-                if draft.get('category') not in categories:
-                    draft['category'] = None
-                fill_request(draft, from_ai=True)
-            except Exception:
-                st.warning('AI drafting is unavailable. You can fill in the form below.')
 
 with st.form('request'):
     left, right = st.columns(2)
@@ -205,8 +205,6 @@ with st.form('request'):
         quote = st.text_input('Vendor quote or estimated cost', key='quote')
         quote_feedback = st.empty()
         comments = st.text_area('Additional comments or justification', key='comments')
-    from_ai = st.session_state.get('from_ai', False)
-    confirmed = not from_ai or st.checkbox('I verified the spending category and date needed', key='confirm_draft')
     if logging_enabled:
         st.caption('Submitting saves your form entries in the project database. Use fictional details only.')
     submitted = st.form_submit_button('Review purchase', type='primary')
@@ -235,28 +233,15 @@ if submitted:
 
     # Clear a previous result before validating the new request.
     st.session_state.pop('review', None)
-    st.session_state.pop('ai_text', None)
-    st.session_state.pop('ai_error', None)
     if not category:
         category_feedback.error('Select a spending category.')
     if not amount.strip():
         amount_feedback.error('Enter the requested amount.')
-    if not confirmed:
-        st.warning('Verify the spending category and date needed before reviewing the draft.')
-    if not category or not amount.strip() or not confirmed or (from_ai and deadline is None):
+    if not category or not amount.strip():
         st.stop()
     try:
         result = evaluate(PurchaseRequest(description, purpose, amount, category, deadline, vendor, quote, comments), budgets, ledger, policies)
         st.session_state['review'] = result
-        if use_ai:
-            if not os.getenv('OPENAI_API_KEY'):
-                st.session_state['ai_error'] = 'No API key configured. Showing the verified rule-based review.'
-            else:
-                try:
-                    with st.spinner('Explaining the verified review…'):
-                        st.session_state['ai_text'] = explain(result)
-                except Exception:
-                    st.session_state['ai_error'] = 'OpenAI explanation unavailable. Showing the verified rule-based review; check API access and model settings.'
     except ValueError as exc:
         amount_feedback.error(str(exc))
 
@@ -302,8 +287,3 @@ else:
             for item in items or ['None identified by configured checks.']:
                 st.write('• ' + item)
         st.caption('Confirm category and supporting documents manually.')
-        if st.session_state.get('ai_error'):
-            st.info(st.session_state['ai_error'])
-        if st.session_state.get('ai_text'):
-            st.markdown('**OpenAI explanation**')
-            st.write(st.session_state['ai_text'])

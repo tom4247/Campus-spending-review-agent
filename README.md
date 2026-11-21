@@ -4,7 +4,7 @@ The agent reviews one proposed purchase at a time and returns **APPROVE**, **DEF
 
 The Team Smile project proposal gives the treasurer responsibility for authorizing actual spending. **APPROVE** completes the agent's review of a routine expense. The treasurer verifies the result before committing funds. **ESCALATE** sends a different signal: the request needs judgment or authority beyond the routine review, such as a budget transfer or an exception. The prototype uses synthetic data and illustrative policies.
 
-**Two ways to review:** Use Gemini chat for natural-language requests, or use the purchase form for a rule-based review. See [Running the app](#running-the-app) for setup.
+**Two ways to review:** Gemini chat is the main interface. Open **Manual review** for the rule-based form. See [Running the app](#running-the-app) for setup.
 
 ## How the agent handles an expense
 
@@ -57,6 +57,7 @@ flowchart LR
     records[("Synthetic budgets, ledger and policy")] --> evidence
     evidence -->|"Facts and policy references"| host
     host --> check["Validate the model response"]
+    check --> reviewLog[("Supabase purchase reviews")]
     check --> card["Streamlit outcome card"]
     card -->|"APPROVE routine expense"| treasurer["Treasurer"]
     card -->|"DEFER for more information"| member
@@ -65,7 +66,7 @@ flowchart LR
 
 | Component | Responsibility |
 |---|---|
-| Streamlit | Collect the member's request, allow optional drafting, and show the agent's decision, evidence, and next action. |
+| Streamlit | Collect the member's request in chat, show the decision and evidence, and prepare a summary for human escalation. |
 | Python evidence builder | Read the budget, paid expenses, commitments, reconciliation dates, and rules. Use decimal arithmetic to calculate the available balance, projected balance, and shortfall. |
 | Gemini expense reviewer | Interpret the purpose, category, quote, and applicable rules. Use the verified evidence and choose APPROVE, DEFER, or ESCALATE. |
 | Response validator | Check the outcome, cited evidence, arithmetic claims, and mandatory rules. Block any approval with a verified shortfall, applicable restriction, or unresolved required information. Require escalation when a configured rule calls for it. |
@@ -98,7 +99,7 @@ flowchart LR
     escalate --> reviewer
 ```
 
-A member can submit the form directly or draft it from a description. The agent can suggest a category and flag uncertainty. The requester confirms the details. If a category or policy remains unclear, the agent asks for clarification or escalates based on the urgency and the applicable rule. The app provides a shareable escalation summary. The requester handles delivery.
+A member describes one purchase in chat. The agent can suggest a category and flag uncertainty. The requester can clarify details and correct the same review in chat. If a category or policy remains unclear, the agent asks for clarification or escalates based on the urgency and the applicable rule. The app provides a shareable escalation summary. The requester handles delivery.
 
 ### Data flow and response contract
 
@@ -137,7 +138,7 @@ The existing **11/12 (91.7%)** score covers the Python form review. Test the Gem
 
 ## Running the app
 
-Gemini chooses recommendations for chat. The purchase form uses Python rules and supports optional OpenAI drafting and explanations.
+Gemini chooses recommendations in chat. The manual fallback uses Python rules and works without an API key.
 
 ### Current code layout
 
@@ -145,7 +146,8 @@ Gemini chooses recommendations for chat. The purchase form uses Python rules and
 app.py                 Streamlit chat, purchase form, and budget overview
 gemini_review.py        Gemini request extraction and recommendation
 review.py              Read-only CSV loading, validation, Decimal calculations, policy checks
-agent.py               OpenAI Responses API explanation and read-only tool
+purchase_chat.py       Chat follow-ups, escalation summaries, and review records
+submission_log.py      Supabase writes for manual submissions and chat reviews
 data/budgets.csv       Category allocations and reconciliation dates
 data/ledger.csv        Paid expenses and outstanding commitments
 data/policies.json     Configurable illustrative rules
@@ -153,11 +155,9 @@ test_review.py         Financial, decision, data validation, and mocked API test
 requirements.txt       Python dependencies
 ```
 
-The user selects the category or confirms a category suggested by the optional AI draft. Python loads and validates the source files, calculates `available = allocation - paid - commitments`, checks completeness, record freshness, restrictions, and approval thresholds, and selects a recommendation. Decimal arithmetic avoids floating-point currency errors.
+The user selects the category in the manual form. Gemini extracts it from the conversation in chat. Python loads and validates the source files, calculates `available = allocation - paid - commitments`, checks completeness, record freshness, restrictions, and approval thresholds, and selects a recommendation. Decimal arithmetic avoids floating-point currency errors.
 
 Escalation takes priority: a shortfall, restriction, threshold requiring authorization, or urgent unresolved information produces ESCALATE. Other missing information or stale records produces DEFER. Otherwise the recommendation is APPROVE. Urgency alone does not escalate an otherwise complete, compliant request. The authorization threshold is inclusive.
-
-When **Add OpenAI explanation** is enabled on the form, the model must call `get_verified_review`, a narrowly defined, read-only tool returning the Python review snapshot. A second model response explains that result. It receives no filesystem access, write tools, raw purchase text, or authority over the decision. The UI always displays Python's result separately. Generated commentary remains fallible; it cannot override the authoritative recommendation. The pattern follows the [official OpenAI function calling documentation](https://developers.openai.com/api/docs/guides/function-calling).
 
 ### Install and run
 
@@ -172,19 +172,22 @@ streamlit run app.py
 
 Open the local URL printed by Streamlit, normally http://localhost:8501. Stop with Ctrl+C. The initial review works without an API key.
 
-For optional live AI explanations, create a local `.env` file with your own `OPENAI_API_KEY` and, if needed, `OPENAI_MODEL`. The default model is `gpt-4.1-mini`. Restart Streamlit after editing configuration, then enable **Add OpenAI explanation** in the sidebar. API calls may incur usage charges. Never commit `.env`. With missing credentials, API errors, or timeouts the app retains its deterministic review and shows a fallback notice.
-
-To draft a request with the configured API key, open **Draft with AI**, describe the purchase, and click **Draft request**. The draft text is sent to OpenAI. Check the suggested fields, fill in missing details, and confirm the category and date before submitting for a rule-based review.
-
 ### Enable Gemini chat
 
-Add `GEMINI_API_KEY=your_actual_key` to your local `.env` file, or add `GEMINI_API_KEY = "your_actual_key"` as a top-level setting in Streamlit Secrets. The default model is `gemini-3.8-flash`. Optionally set `GEMINI_MODEL` to another model your key can access that supports structured output. Keep the key in Secrets or `.env`. [Gemini model documentation](https://aistudio.google.com/docs/models/gemini-3.8-flash)
+Chat is paused by default while the replacement key is pending. Add these top-level settings to Streamlit Secrets, or use the same names in the local `.env` file.
+
+```toml
+GEMINI_API_KEY = "your_actual_key"
+GEMINI_CHAT_ENABLED = true
+```
+
+The default model is `gemini-3.8-flash`. Optionally set `GEMINI_MODEL` to another model your key can access that supports structured output. Keep the key in Secrets or `.env`. [Gemini model documentation](https://aistudio.google.com/docs/models/gemini-3.8-flash)
 
 Open **Review a purchase in chat** and send: “Can we rent a $450 van from Example Van Rentals for our club competition tomorrow? Their quote is $450. Use the Travel budget.” Expect **ESCALATE** for the $150 shortfall. For a follow-up test, send a request with no vendor or quote and reply with the missing details. Choose **Start a new chat request** before reviewing a different purchase.
 
 ### Try the form example
 
-Click **Try a sample request** to fill in a $450 van request. Travel allocation is $2,000 minus $800 paid = $1,200 before commitments. The $900 hotel commitment leaves $300, so the shortfall is $150. The deadline defaults to tomorrow. Select **Review purchase** to see ESCALATE and next steps.
+Under **Manual review**, click **Try a sample request** to fill in a $450 van request. Travel allocation is $2,000 minus $800 paid = $1,200 before commitments. The $900 hotel commitment leaves $300, so the shortfall is $150. The deadline defaults to tomorrow. Select **Review purchase** to see ESCALATE and next steps.
 
 To see APPROVE, use a $100 Travel request with all fields completed and current records. To see DEFER, leave the vendor blank, use a $100 request, and choose a deadline a week away. An urgent request with missing information escalates.
 
@@ -198,9 +201,9 @@ In `policies.json`, configure the inclusive `approval_threshold`, maximum record
 
 ### Supabase submission log
 
-Each click of **Review purchase** saves the submitted fields and a database-generated timestamp when Supabase is configured. This includes incomplete submissions. Chat sends are saved in the same table with `inputs.source = "chat"` and the submitted text in `inputs.message`. Loading a sample or drafting a form creates no row. The review works independently of logging.
+Each click of **Review purchase** saves the submitted fields and a database-generated timestamp when Supabase is configured. This includes incomplete submissions. Loading a sample creates no row. The review works independently of logging.
 
-1. The migration is [`supabase/migrations/202611200001_purchase_submissions.sql`](supabase/migrations/202611200001_purchase_submissions.sql). Push it to the production branch with **Deploy to production** enabled in the Supabase GitHub integration, or run it in the project's **SQL Editor**. It enables row-level security and grants the app's server role insert-only access to this table.
+1. The migration is [`supabase/migrations/202611200001_purchase_submissions.sql`](supabase/migrations/202611200001_purchase_submissions.sql). Push it to the production branch with **Deploy to production** enabled in the Supabase GitHub integration, or run it in the project's **SQL Editor**. It grants the app server insert access for manual submissions. The [purchase reviews migration](supabase/migrations/202611200002_purchase_reviews.sql) adds the table for chat. Both tables have row-level security and exclude visitor access.
 2. In the hosted Streamlit app, open **Settings → Secrets** and add the following top-level settings. For a local run, use the same names in `.env`.
 
    ```toml
@@ -209,6 +212,8 @@ Each click of **Review purchase** saves the submitted fields and a database-gene
    ```
 
 3. Open Streamlit and click **Try a sample request → Review purchase**. Confirm **Submission saved** appears and inspect the new row in Supabase **Table Editor → purchase_submissions**. Use fictional form details for testing and keep the secret key in app settings.
+
+Each chat request gets one row in `purchase_reviews`. Follow-up replies update that row with the full transcript, latest status, verified budget snapshot, and next action. An escalation includes a copyable summary. The Streamlit history displays the current session’s requests. The Supabase Table Editor gives project administrators access to durable history across sessions.
 
 ### Validation
 

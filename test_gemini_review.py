@@ -14,7 +14,11 @@ class GeminiReviewTests(unittest.TestCase):
     def setUp(self):
         self.records = load_records()
         self.today = date(2026, 11, 17)
-        self.messages = ['Can we rent a van for a club competition?', 'It is $80 from Example Vans.']
+        self.messages = [
+            {'role': 'user', 'text': 'Can we rent a van for a club competition?'},
+            {'role': 'assistant', 'text': 'Who gave the quote and how much was it?'},
+            {'role': 'user', 'text': 'Example Vans, $80.'},
+        ]
         self.fields = {
             'description': 'Van rental', 'purpose': 'Club competition', 'amount': '80.00',
             'category': 'Travel', 'deadline': '2026-11-24', 'vendor': 'Example Vans',
@@ -23,7 +27,10 @@ class GeminiReviewTests(unittest.TestCase):
 
     def mock_review(self, decision, expected_outcomes, expected_shortfall='0.00'):
         requests = []
-        replies = iter([self.fields, {'decision': decision, 'reason': 'The reason returned by Gemini.'}])
+        replies = iter([self.fields, {
+            'decision': decision, 'reason': 'The reason returned by Gemini.',
+            'follow_up': 'What is the purchase total and category?' if decision == 'DEFER' else '',
+        }])
         client_type = httpx.Client
 
         def respond(request):
@@ -45,7 +52,7 @@ class GeminiReviewTests(unittest.TestCase):
             finally:
                 self.assertEqual(len(requests), 2)
                 review_payload = json.loads(requests[-1]['contents'][0]['parts'][0]['text'])
-                self.assertEqual(review_payload['user_messages'], self.messages)
+                self.assertEqual(review_payload['conversation'], self.messages)
                 evidence = review_payload['verified_evidence']
                 self.assertEqual(evidence.get('shortfall'), expected_shortfall)
                 self.assertNotIn('decision', evidence)
@@ -69,6 +76,7 @@ class GeminiReviewTests(unittest.TestCase):
         self.fields['amount'] = None
         result = self.mock_review('DEFER', ['DEFER', 'ESCALATE'], None)
         self.assertEqual(result['decision'], 'DEFER')
+        self.assertIn('purchase total', result['follow_up'])
         self.assertIn('Confirm the spending category.', result['evidence']['missing'])
 
     def test_bad_request_identifies_the_key_or_project_issue_without_echoing_provider_message(self):

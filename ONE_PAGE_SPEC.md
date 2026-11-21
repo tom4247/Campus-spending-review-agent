@@ -19,7 +19,7 @@ The **Gemini chat agent reviews one proposed expense at a time and returns APPRO
 |---|---|---|
 | **APPROVE** | The expense fits the verified budget, required evidence is complete, and applicable rules are satisfied. | Proceed to routine treasurer verification and authorization. |
 | **DEFER** | A missing quote, conflicting amount, uncertain category, or stale record needs clarification and can be resolved before the deadline. | Resolve the named issue and resubmit. |
-| **ESCALATE** | A shortfall, restriction, threshold, policy ambiguity, or urgent unresolved issue requires human judgment. | Share the review summary with the authorized advisor or designated financial reviewer. |
+| **ESCALATE** | A shortfall, restriction, threshold, policy ambiguity, or urgent unresolved issue requires human judgment. | Copy the escalation summary and send it to the authorized advisor or designated financial reviewer. |
 
 A $450 Travel van rental with $300 available after commitments has a $150 shortfall. The agent should return **ESCALATE** and explain who can review a possible transfer or supplemental funding. The mock policies include an inclusive $1,000 authorization threshold, extra authorization for Equipment, and a 14-day record freshness limit.
 
@@ -29,4 +29,4 @@ The agent issues the review decision. The organization's authorized people handl
 
 Evaluate at least 10 synthetic cases with expected outcomes and balances recorded in advance. Check the decision, available-funds calculation, and supporting explanation. Flag missing or conflicting evidence. Any approval that exceeds available funds or violates a stated rule fails the proposal's safety criterion.
 
-**Implementation status:** Set `GEMINI_API_KEY` to enable chat. The separate purchase form uses Python to select outcomes, with optional OpenAI drafting and explanations. The existing 12-case evaluation measures the Python baseline.
+**Implementation status:** Set `GEMINI_API_KEY` and `GEMINI_CHAT_ENABLED = true` in app secrets to enable chat. Manual review uses Python to select outcomes and is available without Gemini. Chat is paused until the app owner enables it with a working key. Supabase stores one review per chat request with the transcript, decision, and budget snapshot. The existing 12-case evaluation measures the Python baseline.
