@@ -12,10 +12,11 @@ from chat_review import ChatReviewError
 from review import load_records
 
 
-def price_response(totals, scope, *, missing_details='', unusable_last=False):
+def price_response(totals, scope, *, assumptions='', missing_details='', unusable_last=False):
     prices = [
         {'provider': provider, 'total_usd': total, 'url': f'https://{provider}.example/price',
-         'terms': scope, 'price_type': 'total', 'location': 'Pittsburgh', 'availability': 'confirmed'}
+         'terms': scope, 'price_type': 'total', 'rate_components': [], 'location': 'Pittsburgh',
+         'availability': 'confirmed'}
         for provider, total in zip(('first', 'second', 'third'), totals)
     ]
     sourced = prices[:-1] if unusable_last else prices
@@ -24,7 +25,8 @@ def price_response(totals, scope, *, missing_details='', unusable_last=False):
     ))
     return SimpleNamespace(
         status='completed', output=[web_search],
-        output_text=json.dumps({'scope': scope, 'missing_details': missing_details, 'prices': prices}),
+        output_text=json.dumps({'scope': scope, 'assumptions': assumptions, 'missing_details': missing_details,
+                                'prices': prices}),
     )
 
 
@@ -70,17 +72,19 @@ class OpenAIChatTests(unittest.TestCase):
         with patch.dict(os.environ, {'OPENAI_CHAT_MODEL': ''}), patch('openai.OpenAI') as client:
             create = client.return_value.__enter__.return_value.responses.create
             create.side_effect = [
-                SimpleNamespace(status='completed', output_text=json.dumps(reply))
-                for reply in (fields, decision)
+                SimpleNamespace(status='completed', output_text=json.dumps(fields)),
+                price_response(('200', '280'), 'Similar van rental terms.'),
+                SimpleNamespace(status='completed', output_text=json.dumps(decision)),
             ]
             result = review_chat(messages, 'mock-key', *load_records(), date(2026, 11, 17))
             self.assertEqual(result['decision'], 'ESCALATE')
             self.assertEqual(result['evidence']['shortfall'], '150.00')
-            self.assertEqual(create.call_count, 2)
+            self.assertEqual(create.call_count, 3)
+            self.assertEqual(result['evidence']['market_price']['status'], 'above_range')
             for call in create.call_args_list:
                 self.assertEqual(call.kwargs['model'], 'gpt-6-luna')
                 self.assertEqual(call.kwargs['reasoning'], {'effort': 'none'})
-                self.assertLessEqual(call.kwargs['max_output_tokens'], 512)
+                self.assertLessEqual(call.kwargs['max_output_tokens'], 1350 if 'tools' in call.kwargs else 512)
                 self.assertTrue(call.kwargs['text']['format']['strict'])
                 self.assertFalse(call.kwargs['store'])
             payload = json.loads(create.call_args.kwargs['input'])
@@ -149,9 +153,7 @@ class OpenAIChatTests(unittest.TestCase):
                 if expected_date is None:
                     outcome = {'decision': 'DEFER', 'reason': 'The deadline is missing.', 'follow_up': 'When is it needed?'}
                 create = client.return_value.__enter__.return_value.responses.create
-                responses = [extraction]
-                if expected_date:
-                    responses.append(price_response(('60', '80'), 'The same poster sizes and print quantity.'))
+                responses = [extraction, price_response(('60', '80'), 'The same poster sizes and print quantity.')]
                 responses.append(SimpleNamespace(status='completed', output_text=json.dumps(outcome)))
                 create.side_effect = responses
                 messages = [proposed, question, {'role': 'user', 'text': reply}]
@@ -172,7 +174,7 @@ class OpenAIChatTests(unittest.TestCase):
         for totals, status, excluded_last in (
             (('260', '325'), 'supported', False),
             (('220', '260', '500'), 'above_range', True),
-            (('260', '325'), 'insufficient_sources', True),
+            (('260', '325'), 'benchmark', True),
         ):
             with self.subTest(status=status), patch('openai.OpenAI') as client:
                 response = price_response(totals, scope, unusable_last=excluded_last)
@@ -188,6 +190,7 @@ class OpenAIChatTests(unittest.TestCase):
                 result = review_chat([{'role': 'user', 'text': text}], 'mock-key', *load_records(), date(2026, 11, 25))
                 search = create.call_args_list[1].kwargs
                 self.assertEqual(search['tools'][0]['type'], 'web_search')
+                self.assertEqual(search['tool_choice'], 'required')
                 self.assertEqual(search['include'], ['web_search_call.action.sources'])
                 self.assertEqual(create.call_count, 3)
                 self.assertEqual(result['decision'], decision)
@@ -205,11 +208,12 @@ class OpenAIChatTests(unittest.TestCase):
         research['prices'][0]['price_type'] = 'starting_rate'
         cited = {price['url'] for price in research['prices']}
         result = compare_prices('300', research, cited)
-        self.assertEqual(result['status'], 'insufficient_sources')
+        self.assertEqual(result['status'], 'benchmark')
         self.assertEqual([price['total_usd'] for price in result['prices']], ['280.00'])
         self.assertEqual(len(result['options']), 2)
 
         research['missing_details'] = 'How many days and miles do you need?'
+        research['prices'][1]['price_type'] = 'starting_rate'
         result = compare_prices('300', research, cited)
         self.assertEqual(result['status'], 'needs_details')
         self.assertEqual(result['summary'], research['missing_details'])
@@ -239,9 +243,49 @@ class OpenAIChatTests(unittest.TestCase):
             result = review_chat(messages, 'mock-key', *load_records(), date(2026, 11, 25))
 
         market = result['evidence']['market_price']
-        self.assertEqual(market['status'], 'insufficient_sources')
+        self.assertEqual(market['status'], 'benchmark')
         self.assertEqual(market['prices'], [])
         self.assertEqual([option['price_type'] for option in market['options']],
                          ['total', 'starting_rate', 'quote_required'])
         self.assertEqual(market['options'][-1]['total_usd'], '')
         self.assertEqual(result['follow_up'], '')
+
+    def test_brief_van_request_checks_budget_and_public_benchmark_on_first_turn(self):
+        fields = {
+            'description': 'Van rental', 'purpose': '', 'amount': '300.00', 'category': 'Travel',
+            'deadline': '', 'vendor': '', 'quote': '',
+        }
+        response = price_response(
+            ('', '19.00'), 'One-day round-trip cargo van rental with 100 miles.',
+            assumptions='Pittsburgh, PA. One rental day and 100 miles because the request gave no terms.',
+            missing_details='How long do you need the van and how far will you drive?',
+        )
+        research = json.loads(response.output_text)
+        research['prices'][0].update(price_type='benchmark', availability='unverified', rate_components=[
+            {'label': 'Base rate per day', 'unit_usd': '19.95', 'quantity': 1},
+            {'label': 'Mileage', 'unit_usd': '0.99', 'quantity': 100},
+        ])
+        research['prices'][1]['price_type'] = 'starting_rate'
+        response.output_text = json.dumps(research)
+        decision = {'decision': 'DEFER', 'reason': 'The request fits the budget and the price looks high for the reference trip.',
+                    'follow_up': 'How long do you need the van and how far will you drive?'}
+        with patch('openai.OpenAI') as client:
+            create = client.return_value.__enter__.return_value.responses.create
+            create.side_effect = [
+                SimpleNamespace(status='completed', output_text=json.dumps(fields)), response,
+                SimpleNamespace(status='completed', output_text=json.dumps(decision)),
+            ]
+            result = review_chat([{'role': 'user', 'text': 'I want to spend 300 on a van rental'}],
+                                 'mock-key', *load_records(), date(2026, 11, 25))
+            self.assertEqual(create.call_count, 3)
+            allowed = json.loads(create.call_args.kwargs['input'])['allowed_outcomes']
+            self.assertNotIn('APPROVE', allowed)
+
+        self.assertEqual(result['request']['deadline'], '')
+        self.assertEqual(result['evidence']['available'], '300.00')
+        self.assertEqual(result['evidence']['shortfall'], '0.00')
+        market = result['evidence']['market_price']
+        self.assertEqual(market['status'], 'benchmark')
+        self.assertEqual(market['options'][0]['total_usd'], '118.95')
+        self.assertIn('above the published benchmark of $118.95', market['summary'])
+        self.assertEqual(result['follow_up'], decision['follow_up'])

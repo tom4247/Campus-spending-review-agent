@@ -25,6 +25,8 @@ The suite now passes **29 tests**. A follow-up test verifies that a confirmed de
 
 A later regression test brought the suite to **30 passing tests**. It verified that a rental search retains sourced nearby providers with public rates or quote forms, excludes unverified availability from the comparison, and keeps the follow-up from asking the requester to find their own quotes.
 
+The first-turn price assessment brought the suite to **31 passing tests**. With mocked web results, “I want to spend 300 on a van rental” put the $300 Travel balance beside an indicative price assessment. The benchmark used a sourced $19.95 day rate and $0.99 per mile for an assumed 100-mile trip, producing $118.95 before other charges. The request remained deferred while the rental terms were incomplete.
+
 ## Results from the November 20 deployment
 
 ### Hosted OpenAI and Supabase check

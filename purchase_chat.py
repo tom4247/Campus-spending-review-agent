@@ -55,6 +55,8 @@ def build_reply(result, escalation_authority):
         elif market.get('status') == 'insufficient_sources':
             action = ('See the provider pages under Market price check for exact pricing and availability.'
                       if market.get('options') else 'Retry the search or ask the treasurer to review the existing quote.')
+        elif market.get('status') == 'benchmark' and result['evidence']['missing'] == [market['summary']]:
+            action = 'Confirm the terms and all-in price before committing funds.'
         else:
             action = 'Reply with the requested details to continue this review.'
     else:

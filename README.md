@@ -181,13 +181,13 @@ Add a key from a funded OpenAI API project and these top-level settings to **Str
 OPENAI_API_KEY = "your_actual_key"
 ```
 
-The default, `gpt-6-luna`, uses Standard rates and sets reasoning effort to `none`. Purchase reviews use structured output for extraction and the recommendation. A request that passes the budget and policy checks also uses a web-search response for a price comparison. Set `OPENAI_CHAT_MODEL` only if you want to use another model that supports structured outputs and web search. The key enables chat by default. To pause it, set `OPENAI_CHAT_ENABLED = false`. [GPT-6 Luna pricing and capabilities](https://developers.openai.com/api/docs/models/gpt-6-luna)
+The default, `gpt-6-luna`, uses Standard rates and sets reasoning effort to `none`. Purchase reviews use structured output for extraction and the recommendation. When the purchase and amount are known, the agent also searches public prices. Set `OPENAI_CHAT_MODEL` only if you want to use another model that supports structured outputs and web search. The key enables chat by default. To pause it, set `OPENAI_CHAT_ENABLED = false`. [GPT-6 Luna pricing and capabilities](https://developers.openai.com/api/docs/models/gpt-6-luna)
 
 Open **Review a purchase in chat** and send “Can we rent a $450 van from Example Van Rentals for our club competition tomorrow? Their quote is $450. Use the Travel budget.” On a fresh session, expect **ESCALATE** for the $150 shortfall. Reply in the same request to add missing details. Date replies such as `tomorrow`, `two days from now`, and `11/27/26` update the **Needed by** date shown on the latest review. Choose **Start a new chat request** before reviewing a different purchase.
 
 ### Check a purchase price
 
-For a van rental, include the pickup city, vehicle class, pickup and return timing, mileage, and what the quote covers. The agent searches for nearby providers and displays their locations, published prices, availability status, and direct provider links under **Market price check**. When a booking form is needed, the provider is still listed. The app uses two comparable rental totals with confirmed availability to support a price. Already paid expenses are recorded through the payment flow.
+Start with `I want to spend 300 on a van rental`. The agent shows the budget and searches for public prices in the same reply. Without rental details, it uses a Pittsburgh one-day round-trip cargo van rental with 100 miles as its reference scenario, and it labels the assumptions and any fees excluded from published benchmarks. Supply the pickup city, vehicle class, dates, mileage, or included charges to refine the search. **Market price check** shows the sources and how published rates were combined. Two comparable totals with confirmed rental availability are needed to support an approval recommendation. Already paid expenses go through the payment flow.
 
 ### Report a payment
 

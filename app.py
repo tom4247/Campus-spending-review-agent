@@ -69,6 +69,10 @@ def display_chat_message(message):
         if deadline := evidence.get('deadline'):
             needed_by = date.fromisoformat(deadline)
             st.text(f'Needed by {needed_by:%B} {needed_by.day}, {needed_by.year}')
+        if 'available' in evidence:
+            st.text(f"{evidence['category']} available: ${Decimal(evidence['available']):,.2f}")
+        if 'shortfall' in evidence:
+            st.text(f"Shortfall: ${Decimal(evidence['shortfall']):,.2f}")
         st.text(message['text'])
         st.text(message['next_action'])
         if decision == 'ESCALATE':
@@ -80,6 +84,8 @@ def display_chat_message(message):
                 st.text(market['summary'])
                 if market.get('scope'):
                     st.text(market['scope'])
+                if market.get('assumptions'):
+                    st.text(f"Reference assumptions · {market['assumptions']}")
                 for index, option in enumerate(market.get('options', market['prices']), 1):
                     provider = option['provider']
                     if location := option.get('location'):
@@ -88,21 +94,20 @@ def display_chat_message(message):
                         price_label = 'Exact price requires a provider quote'
                     else:
                         price = f"${Decimal(option['total_usd']):,.2f}"
-                        price_label = f'Published starting rate {price}' if option.get('price_type') == 'starting_rate' else price
+                        label = {'benchmark': 'Published benchmark', 'starting_rate': 'Published starting rate'}.get(
+                            option.get('price_type'),
+                        )
+                        price_label = f'{label} {price}' if label else price
                     availability = {
                         'confirmed': 'Availability confirmed for the requested dates',
                         'unverified': 'Availability unverified',
                         'unavailable': 'Unavailable for the requested dates',
                     }.get(option.get('availability'))
-                    details = [provider, price_label, availability, option['terms']]
+                    details = [provider, price_label, option.get('calculation'), availability, option['terms']]
                     st.text('\n'.join(detail for detail in details if detail))
                     st.link_button(f'Open provider page {index}', option['url'])
 
         with st.expander('Verified checks and interpreted request'):
-            if 'available' in evidence:
-                st.text(f"{evidence['category']} available: ${Decimal(evidence['available']):,.2f}")
-            if 'shortfall' in evidence:
-                st.text(f"Shortfall: ${Decimal(evidence['shortfall']):,.2f}")
             for item in evidence['escalation_reasons'] + evidence['missing']:
                 if not market or item != market['summary']:
                     st.text(item)
