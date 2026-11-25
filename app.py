@@ -119,7 +119,7 @@ def display_chat_message(message):
 
 
 st.subheader('Review a purchase in chat')
-st.caption('Describe a planned purchase or report money already spent.')
+st.caption('Tell the chat what you plan to buy and how much it costs for a budget and price check. You can also report money already spent.')
 if chat_enabled:
     disclosure = 'Chat sends fictional purchase details to OpenAI for review.'
     if logging_enabled:
