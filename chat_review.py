@@ -21,6 +21,7 @@ DATE_TEXT = re.compile(
 DEADLINE_CUE = re.compile(r'\b(?:need(?:ed)?|due|deadline|required on)\b', re.IGNORECASE)
 OTHER_DATE_CUE = re.compile(r'\b(?:quote|quoted|estimate|invoice|receipt|paid|issued|received|ordered)\b',
                             re.IGNORECASE)
+MEAL_DESCRIPTION = re.compile(r'\b(?:food|restaurant|meals?|entr[ée]es?|burritos?|pizza)\b', re.IGNORECASE)
 
 
 class ChatReviewError(Exception):
@@ -115,6 +116,18 @@ def review_with_model(messages, budgets, ledger, policies, today, generate, comp
     if latest and fields['description'] and evidence['amount'] is not None:
         market = compare_with_market(fields)
         if market.get('routine_estimate'):
+            inferred_category = False
+            if not request.category and 'Events' in categories:
+                named = [category for category in categories if any(
+                    message['role'] == 'user' and re.search(
+                        rf'\b{re.escape(category)}\b', message['text'], re.IGNORECASE,
+                    ) for message in messages
+                )]
+                if len(named) == 1:
+                    request.category = fields['category'] = named[0]
+                elif not named and MEAL_DESCRIPTION.search(f"{request.description} {market['scope']}"):
+                    request.category = fields['category'] = 'Events'
+                    inferred_category = True
             high = None
             if 'estimated_high' in market:
                 low, high = Decimal(market['estimated_low']), Decimal(market['estimated_high'])
@@ -124,6 +137,8 @@ def review_with_model(messages, budgets, ledger, policies, today, generate, comp
                     request.quote = fields['quote']
             evidence = review_evidence(request, budgets, ledger, policies, today, allow_incomplete=True, routine_purchase=True)
             evidence['routine_purchase'] = True
+            if inferred_category:
+                evidence['rules'].append('Events is the default category for a routine meal unless the requester specifies another category.')
             if high is not None and 'available' in evidence and high > Decimal(evidence['available']):
                 evidence['missing'].append('The high end of the price estimate exceeds the available budget. Confirm the final total.')
 

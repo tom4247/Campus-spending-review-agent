@@ -120,7 +120,7 @@ def display_chat_message(message):
 
 
 st.subheader('Review a purchase in chat')
-st.caption('Tell the chat what you want to buy and how much it costs. For routine purchases, it looks up a price estimate.')
+st.caption('Tell the chat what you want to buy and how much it costs. It checks local prices and the available budget.')
 if chat_enabled:
     disclosure = 'Chat sends fictional purchase details to OpenAI for review.'
     if logging_enabled:

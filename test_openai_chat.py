@@ -300,7 +300,7 @@ class OpenAIChatTests(unittest.TestCase):
         ):
             with self.subTest(amount=amount), patch('openai.OpenAI') as client:
                 fields = {'description': 'Two Chipotle entrées', 'purpose': '', 'amount': amount,
-                          'category': 'Events', 'deadline': '', 'vendor': 'Chipotle', 'quote': ''}
+                          'category': '', 'deadline': '', 'vendor': 'Chipotle', 'quote': ''}
                 response = price_response(('',), 'Two standard chicken entrées for pickup.',
                                           assumptions='Pittsburgh pickup, before tax and extras.')
                 research = json.loads(response.output_text)
