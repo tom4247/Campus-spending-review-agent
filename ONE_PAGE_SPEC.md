@@ -4,7 +4,7 @@
 
 ## What it does
 
-A requester describes a purchase in chat. OpenAI extracts the item, purpose, USD amount, spending category, needed-by date, vendor, and quote. Python calculates **available funds = allocation − paid expenses − outstanding commitments**. Once the item and amount are known, the agent searches public provider prices and shows them alongside the budget. It labels any assumptions used for a preliminary benchmark. The model uses this evidence to recommend an outcome. Python withholds APPROVE when the price exceeds the comparable range or price evidence is insufficient.
+A requester describes a purchase in chat. OpenAI extracts the request and researches public provider prices. Python calculates **available funds = allocation − paid expenses − outstanding commitments**. For routine purchases, a comparable published estimate can support a recommendation when the price is close and the costs fit the budget. The agent labels its assumptions. Date-sensitive or materially uncertain purchases need firmer prices and terms before approval.
 
 | Decision | What happens next |
 |---|---|
@@ -26,4 +26,4 @@ With Supabase configured, each request gets a `purchase_reviews` row with its la
 
 The prototype uses synthetic records and illustrative policies. Authorized people handle spending approval, purchases, payments, ledger changes, and exceptions. The agent produces and records a recommendation. The requester handles escalation delivery.
 
-In a hosted trial, 12 of 12 comparable decision labels matched, including all four comparable mandatory escalations. All 14 prompts shared one chat. The original 14-case hit rate remains unverified because it requires budget evidence and specific stale-record and two-turn checks. The [evaluation](AGENT_EVALUATION.md) includes the observed outcomes, a manual-review score of 11/12, and 31 passing local automated tests. See [known weaknesses](KNOWN_WEAKNESSES.md) for reproduced issues.
+In a hosted trial, 12 of 12 comparable decision labels matched, including all four comparable mandatory escalations. All 14 prompts shared one chat. The original 14-case hit rate remains unverified because it requires budget evidence and specific stale-record and two-turn checks. The [evaluation](AGENT_EVALUATION.md) includes the observed outcomes, a manual-review score of 11/12, and 33 passing local automated tests. See [known weaknesses](KNOWN_WEAKNESSES.md) for reproduced issues.

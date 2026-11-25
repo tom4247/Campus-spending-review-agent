@@ -1,5 +1,6 @@
 """Shared request extraction, budget evidence, and policy checks for chat."""
 from datetime import date, timedelta
+from decimal import Decimal
 import re
 
 from market_prices import add_market_evidence
@@ -88,6 +89,8 @@ def review_with_model(messages, budgets, ledger, policies, today, generate, comp
         'such as “spend 300 on a van rental” is a USD amount. Keep the quote or estimate '
         'as quoted by the user. A stated vendor quote can also provide the requested total when clear. '
         'Use a category from the supplied list if explicit or clearly supported by the purchase. '
+        'For example, charge a restaurant meal to Events when that category is available and the user '
+        'did not specify a different category. '
         'A date or relative time by itself can answer a deadline question. Interpret US dates as month/day/year. '
         'Express the needed-by date as YYYY-MM-DD using the supplied current date for relative dates.',
         {'conversation': messages, 'today': today.isoformat(), 'categories': categories},
@@ -108,13 +111,29 @@ def review_with_model(messages, budgets, ledger, policies, today, generate, comp
     fields['deadline'] = deadline.isoformat() if deadline else ''
     request = PurchaseRequest(**{**fields, 'deadline': deadline})
     evidence = review_evidence(request, budgets, ledger, policies, today, allow_incomplete=True)
-    request_missing = bool(evidence['missing'])
+    market = None
     if latest and fields['description'] and evidence['amount'] is not None:
-        add_market_evidence(evidence, compare_with_market(fields))
+        market = compare_with_market(fields)
+        if market['status'] in ('supported_estimate', 'above_estimate', 'below_estimate'):
+            low, high = Decimal(market['estimated_low']), Decimal(market['estimated_high'])
+            if not fields['quote']:
+                estimate = f'${low:,.2f}' if low == high else f'${low:,.2f}–${high:,.2f}'
+                fields['quote'] = f"Published price estimate {estimate} · {market['scope']}"
+                request.quote = fields['quote']
+            evidence = review_evidence(request, budgets, ledger, policies, today, allow_incomplete=True, routine_purchase=True)
+            evidence['routine_purchase'] = True
+            if market['status'] == 'supported_estimate' and 'available' in evidence and high > Decimal(evidence['available']):
+                evidence['missing'].append('The high end of the price estimate exceeds the available budget. Confirm the final total.')
+
+    request_missing = bool(evidence['missing'])
+    if market:
+        add_market_evidence(evidence, market)
 
     allowed = ['APPROVE', 'DEFER', 'ESCALATE']
     if evidence['escalation_reasons']:
         allowed = ['ESCALATE']
+    elif market and market['status'] in ('above_estimate', 'below_estimate'):
+        allowed = ['DEFER']
     elif evidence['missing']:
         allowed = ['DEFER', 'ESCALATE']
     result = generate(
@@ -133,6 +152,10 @@ def review_with_model(messages, budgets, ledger, policies, today, generate, comp
         'options found by the search and distinguish confirmed totals, indicative benchmarks, starting rates, '
         'and quote-form links. Explain the price assessment even when the purchase needs more details or '
         'is above budget. Keep assumptions out of the verified purchase fields. '
+        'When the market result is supported_estimate and APPROVE is allowed, recommend approval for an '
+        'ordinary purchase unless the conversation contains a material conflict. Treat the public price '
+        'estimate as sufficient and use its labeled assumptions. Purpose and deadline are optional in this '
+        'routine review. An above_estimate or below_estimate result needs an explanation or a more accurate total. '
         'Cite only prices in the supplied market evidence. '
         'Consider whether the size or quantity makes sense for the requester’s stated purpose and ask for '
         'a justification if the fit is unclear. '

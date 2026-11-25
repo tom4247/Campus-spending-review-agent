@@ -187,7 +187,9 @@ Open **Review a purchase in chat** and send “Can we rent a $450 van from Examp
 
 ### Check a purchase price
 
-Start with `I want to spend 300 on a van rental`. The agent shows the budget and searches for public prices in the same reply. Without rental details, it uses a Pittsburgh one-day round-trip cargo van rental with 100 miles as its reference scenario, and it labels the assumptions and any fees excluded from published benchmarks. Supply the pickup city, vehicle class, dates, mileage, or included charges to refine the search. **Market price check** shows the sources and how published rates were combined. Two comparable totals with confirmed rental availability are needed to support an approval recommendation. Already paid expenses go through the payment flow.
+Start with `$20 for two people from Chipotle`. The agent checks the Events balance and looks up local prices for two standard entrées. For a routine purchase with comparable published pricing, the estimate can satisfy the quote requirement. The chat can recommend approval when the requested and estimated costs fit the budget and the price is within the estimated range or 20% of it. An amount outside that range prompts clarification. Purpose and deadline are optional for this routine check.
+
+For a request such as `I want to spend 300 on a van rental`, the agent shows the budget and searches for public prices in the same reply. Without rental details, it uses a Pittsburgh one-day round-trip cargo van rental with 100 miles as its reference scenario and labels the assumptions. **Market price check** shows the sources and any excluded fees. Rentals require two comparable totals with confirmed availability to support approval. Already paid expenses go through the payment flow.
 
 ### Report a payment
 
@@ -205,7 +207,7 @@ Under **Manual review**, click **Try a sample request** to fill in a $450 van re
 
 To see APPROVE, use a $100 Travel request with all fields completed and current records. To see DEFER, leave the vendor blank, use a $100 request, and choose a deadline a week away. An urgent request with missing information escalates.
 
-Sample records were verified on **November 11, 2026**. After 14 days they intentionally become stale. Update `verified_on` only after reconciling the entire category, including commitments; do not automatically refresh it when the app starts. The real current date drives review freshness and deadlines.
+The current sample ledger was reconciled on **November 25, 2026**. Records become stale after 14 days. Set `verified_on` after reconciling the entire category, including commitments. The real date drives review freshness and deadlines. Historical tests use the November 11 verification date.
 
 ### Configure data and policies
 

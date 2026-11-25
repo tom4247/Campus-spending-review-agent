@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -9,7 +10,7 @@ from openai import RateLimitError
 
 from agent import review_chat
 from chat_review import ChatReviewError
-from review import load_records
+from test_review import historical_records
 
 
 def price_response(totals, scope, *, assumptions='', missing_details='', unusable_last=False):
@@ -43,7 +44,7 @@ class OpenAIChatTests(unittest.TestCase):
                 create.side_effect = RateLimitError('private provider details', response=response,
                                                     body={'code': code, 'type': kind})
                 with self.assertRaisesRegex(ChatReviewError, expected) as error:
-                    review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+                    review_chat([], 'mock-key', *historical_records(), date(2026, 11, 17))
                 self.assertNotIn('private provider details', str(error.exception))
                 if code:
                     self.assertIn(code, str(error.exception))
@@ -57,7 +58,7 @@ class OpenAIChatTests(unittest.TestCase):
             create.side_effect = RateLimitError('temporary limit', response=response,
                                                 body={'code': 'slow_down', 'type': 'rate_limit_error'})
             with self.assertRaisesRegex(ChatReviewError, 'temporarily limited the request rate'):
-                review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+                review_chat([], 'mock-key', *historical_records(), date(2026, 11, 17))
             self.assertEqual(create.call_count, 2)
             sleep.assert_called_once_with(2)
 
@@ -76,7 +77,7 @@ class OpenAIChatTests(unittest.TestCase):
                 price_response(('200', '280'), 'Similar van rental terms.'),
                 SimpleNamespace(status='completed', output_text=json.dumps(decision)),
             ]
-            result = review_chat(messages, 'mock-key', *load_records(), date(2026, 11, 17))
+            result = review_chat(messages, 'mock-key', *historical_records(), date(2026, 11, 17))
             self.assertEqual(result['decision'], 'ESCALATE')
             self.assertEqual(result['evidence']['shortfall'], '150.00')
             self.assertEqual(create.call_count, 3)
@@ -96,7 +97,7 @@ class OpenAIChatTests(unittest.TestCase):
             create = client.return_value.__enter__.return_value.responses.create
             create.return_value = SimpleNamespace(status='incomplete', output_text='')
             with self.assertRaisesRegex(ChatReviewError, 'incomplete review'):
-                review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+                review_chat([], 'mock-key', *historical_records(), date(2026, 11, 17))
             create.assert_called_once()
 
     def test_openai_cannot_approve_a_verified_shortfall(self):
@@ -111,7 +112,7 @@ class OpenAIChatTests(unittest.TestCase):
                 SimpleNamespace(status='completed', output_text='{"decision":"APPROVE","reason":"Approved","follow_up":""}'),
             ]
             with self.assertRaisesRegex(ChatReviewError, 'conflicted'):
-                review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+                review_chat([], 'mock-key', *historical_records(), date(2026, 11, 17))
 
     def test_openai_defers_when_details_are_missing(self):
         fields = {
@@ -125,7 +126,7 @@ class OpenAIChatTests(unittest.TestCase):
                 SimpleNamespace(status='completed', output_text=json.dumps(reply))
                 for reply in (fields, decision)
             ]
-            result = review_chat([], 'mock-key', *load_records(), date(2026, 11, 17))
+            result = review_chat([], 'mock-key', *historical_records(), date(2026, 11, 17))
             self.assertEqual(result['decision'], 'DEFER')
             self.assertEqual(result['follow_up'], decision['follow_up'])
             self.assertIn('Provide vendor.', result['evidence']['missing'])
@@ -157,7 +158,7 @@ class OpenAIChatTests(unittest.TestCase):
                 responses.append(SimpleNamespace(status='completed', output_text=json.dumps(outcome)))
                 create.side_effect = responses
                 messages = [proposed, question, {'role': 'user', 'text': reply}]
-                result = review_chat(messages, 'mock-key', *load_records(), date(2026, 11, 25))
+                result = review_chat(messages, 'mock-key', *historical_records(), date(2026, 11, 25))
                 evidence = json.loads(create.call_args.kwargs['input'])['verified_evidence']
                 self.assertEqual(evidence['deadline'], expected_date)
                 self.assertEqual(result['request']['deadline'], expected_date or '')
@@ -187,7 +188,7 @@ class OpenAIChatTests(unittest.TestCase):
                     response,
                     SimpleNamespace(status='completed', output_text=json.dumps(outcome)),
                 ]
-                result = review_chat([{'role': 'user', 'text': text}], 'mock-key', *load_records(), date(2026, 11, 25))
+                result = review_chat([{'role': 'user', 'text': text}], 'mock-key', *historical_records(), date(2026, 11, 25))
                 search = create.call_args_list[1].kwargs
                 self.assertEqual(search['tools'][0]['type'], 'web_search')
                 self.assertEqual(search['tool_choice'], 'required')
@@ -226,6 +227,7 @@ class OpenAIChatTests(unittest.TestCase):
         scope = 'One-day Pittsburgh cargo van rental.'
         response = price_response(('240', '260', ''), scope)
         research = json.loads(response.output_text)
+        research['routine_estimate'] = True
         research['prices'][0]['availability'] = 'unverified'
         research['prices'][1]['price_type'] = 'starting_rate'
         research['prices'][2]['price_type'] = 'quote_required'
@@ -240,7 +242,7 @@ class OpenAIChatTests(unittest.TestCase):
                 SimpleNamespace(status='completed', output_text=json.dumps(outcome)),
             ]
             messages = [{'role': 'user', 'text': 'We need a one-day Pittsburgh cargo van rental in two days.'}]
-            result = review_chat(messages, 'mock-key', *load_records(), date(2026, 11, 25))
+            result = review_chat(messages, 'mock-key', *historical_records(), date(2026, 11, 25))
 
         market = result['evidence']['market_price']
         self.assertEqual(market['status'], 'benchmark')
@@ -276,7 +278,7 @@ class OpenAIChatTests(unittest.TestCase):
                 SimpleNamespace(status='completed', output_text=json.dumps(decision)),
             ]
             result = review_chat([{'role': 'user', 'text': 'I want to spend 300 on a van rental'}],
-                                 'mock-key', *load_records(), date(2026, 11, 25))
+                                 'mock-key', *historical_records(), date(2026, 11, 25))
             self.assertEqual(create.call_count, 3)
             allowed = json.loads(create.call_args.kwargs['input'])['allowed_outcomes']
             self.assertNotIn('APPROVE', allowed)
@@ -289,3 +291,65 @@ class OpenAIChatTests(unittest.TestCase):
         self.assertEqual(market['options'][0]['total_usd'], '118.95')
         self.assertIn('above the published benchmark of $118.95', market['summary'])
         self.assertEqual(result['follow_up'], decision['follow_up'])
+
+    def test_routine_menu_estimate_allows_approval_and_defers_an_expensive_order(self):
+        for amount, status, decision in (
+            ('20', 'supported_estimate', 'APPROVE'),
+            ('45', 'above_estimate', 'DEFER'),
+            ('2', 'below_estimate', 'DEFER'),
+        ):
+            with self.subTest(amount=amount), patch('openai.OpenAI') as client:
+                fields = {'description': 'Two Chipotle entrées', 'purpose': '', 'amount': amount,
+                          'category': 'Events', 'deadline': '', 'vendor': 'Chipotle', 'quote': ''}
+                response = price_response(('',), 'Two standard chicken entrées for pickup.',
+                                          assumptions='Pittsburgh pickup, before tax and extras.')
+                research = json.loads(response.output_text)
+                research['routine_estimate'] = True
+                research['prices'][0].update(
+                    provider='Chipotle', price_type='benchmark', availability='not_applicable',
+                    rate_components=[{'label': 'Chicken entrée', 'unit_usd': '8.45', 'quantity': 2}],
+                )
+                response.output_text = json.dumps(research)
+                outcome = {'decision': decision, 'reason': 'Compared with the published menu.',
+                           'follow_up': '' if decision == 'APPROVE' else 'What is included in the amount?'}
+                create = client.return_value.__enter__.return_value.responses.create
+                create.side_effect = [
+                    SimpleNamespace(status='completed', output_text=json.dumps(fields)), response,
+                    SimpleNamespace(status='completed', output_text=json.dumps(outcome)),
+                ]
+                messages = [{'role': 'user', 'text': f'${amount} for two people from Chipotle'}]
+                result = review_chat(messages, 'mock-key', *historical_records(), date(2026, 11, 25))
+                evidence = result['evidence']
+                self.assertEqual(result['decision'], decision)
+                self.assertEqual(evidence['available'], '1900.00')
+                self.assertEqual(evidence['market_price']['status'], status)
+                self.assertTrue(evidence['routine_purchase'])
+                self.assertIn('Published price estimate $16.90', result['request']['quote'])
+                self.assertNotIn('Provide the date needed.', evidence['missing'])
+                self.assertNotIn('Provide purpose.', evidence['missing'])
+                allowed = json.loads(create.call_args.kwargs['input'])['allowed_outcomes']
+                self.assertEqual('APPROVE' in allowed, decision == 'APPROVE')
+
+    def test_routine_estimate_still_respects_budget_and_required_escalation(self):
+        fields = {'description': 'Two meals', 'purpose': '', 'amount': '20', 'category': 'Events',
+                  'deadline': '', 'vendor': 'Chipotle', 'quote': ''}
+        response = price_response(('22',), 'Two meals for pickup.')
+        research = json.loads(response.output_text)
+        research['routine_estimate'] = True
+        response.output_text = json.dumps(research)
+        for allocation, decision in (('1121', 'DEFER'), ('1110', 'ESCALATE')):
+            with self.subTest(allocation=allocation), patch('openai.OpenAI') as client:
+                budgets, ledger, policies = historical_records()
+                next(row for row in budgets if row['category'] == 'Events')['allocation'] = Decimal(allocation)
+                outcome = {'decision': decision, 'reason': 'Check the available funds.',
+                           'follow_up': 'Can you confirm the checkout total?' if decision == 'DEFER' else ''}
+                create = client.return_value.__enter__.return_value.responses.create
+                create.side_effect = [
+                    SimpleNamespace(status='completed', output_text=json.dumps(fields)), response,
+                    SimpleNamespace(status='completed', output_text=json.dumps(outcome)),
+                ]
+                result = review_chat([{'role': 'user', 'text': '$20 for two people from Chipotle'}],
+                                     'mock-key', budgets, ledger, policies, date(2026, 11, 25))
+                self.assertEqual(result['decision'], decision)
+                allowed = json.loads(create.call_args.kwargs['input'])['allowed_outcomes']
+                self.assertNotIn('APPROVE', allowed)

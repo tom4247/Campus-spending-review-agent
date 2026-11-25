@@ -114,12 +114,13 @@ def display_chat_message(message):
             st.markdown('**Policy checks**')
             for rule in evidence['rules']:
                 st.text(rule)
-            st.table([{'Field': field.capitalize(), 'Value': value or 'Missing'}
+            optional = {'purpose', 'deadline'} if evidence.get('routine_purchase') else set()
+            st.table([{'Field': field.capitalize(), 'Value': value or ('Optional' if field in optional else 'Missing')}
                       for field, value in result['request'].items()])
 
 
 st.subheader('Review a purchase in chat')
-st.caption('Tell the chat what you plan to buy and how much it costs for a budget and price check. You can also report money already spent.')
+st.caption('Describe what you want to buy and the price. Routine purchases can use a published price estimate.')
 if chat_enabled:
     disclosure = 'Chat sends fictional purchase details to OpenAI for review.'
     if logging_enabled:

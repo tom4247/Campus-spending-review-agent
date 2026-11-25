@@ -44,10 +44,12 @@ class SpendingDetailsNeeded(ValueError):
 
 def build_reply(result, escalation_authority):
     decision = result['decision']
+    market = result['evidence'].get('market_price', {})
     if decision == 'APPROVE':
-        action = 'Verify the supporting details and authorize the expense through your treasurer process.'
+        action = ('Confirm the checkout total and authorize the expense through your treasurer process.'
+                  if market.get('status') == 'supported_estimate' else
+                  'Verify the supporting details and authorize the expense through your treasurer process.')
     elif decision == 'DEFER':
-        market = result['evidence'].get('market_price', {})
         if any(item.startswith('Verify category records') for item in result['evidence']['missing']):
             action = 'Reconcile the budget records before relying on this review. Reply with other missing details.'
         elif market.get('status') == 'unavailable':

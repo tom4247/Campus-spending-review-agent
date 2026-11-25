@@ -2,6 +2,7 @@
 
 import json
 import re
+from decimal import Decimal
 from urllib.parse import urlsplit
 
 from review import money
@@ -31,12 +32,13 @@ SEARCH_FORMAT = {
             'scope': {'type': 'string'},
             'assumptions': {'type': 'string'},
             'missing_details': {'type': 'string'},
+            'routine_estimate': {'type': 'boolean'},
             'prices': {'type': 'array', 'items': {
                 'type': 'object', 'properties': PRICE_FIELDS,
                 'required': list(PRICE_FIELDS), 'additionalProperties': False,
             }},
         },
-        'required': ['scope', 'assumptions', 'missing_details', 'prices'],
+        'required': ['scope', 'assumptions', 'missing_details', 'routine_estimate', 'prices'],
         'additionalProperties': False,
     },
 }
@@ -51,6 +53,10 @@ SEARCH_INSTRUCTIONS = (
     'with 100 miles as a reference for an unspecified van rental. Use stated terms over defaults. Base the '
     'search on relevant comparable providers or official published rate guides, and include the local '
     'branch or service area when known. Give the source page where the price was actually published. '
+    'When the requester names a restaurant and party size, find that restaurant’s local priced menu and '
+    'estimate one standard entree per person. Assume pickup unless the requester specifies delivery. '
+    'Use the provider’s own site or a current, local priced menu or ordering page for that provider, '
+    'labeling pickup versus delivery and any excluded taxes, tips, or extras. '
     'For van rentals, compare rental period, included mileage, taxes, fees, and coverage. For goods, compare '
     'specifications and quantity. Use missing_details only for a material detail the requester must supply. '
     'Never assume fees or inventory. Search official rate guides for the full reference period and quantity '
@@ -67,9 +73,21 @@ SEARCH_INSTRUCTIONS = (
     'requested dates or time. Use unverified when availability requires a form or the page only lists the item. '
     'Exclude the requester’s own quote and membership-only pricing unless their eligibility is confirmed. '
     'Retain useful local options even if exact totals are unavailable. Use one common reference scenario, '
-    'list any assumptions, and set scope to the comparison terms. Leave the recommendation to the reviewer.'
+    'list any assumptions, and set scope to the comparison terms. Set routine_estimate true only for a '
+    'standard purchase with a known quantity and directly comparable published prices, including an ordinary '
+    'restaurant order for a stated number of people. Ordinary menu choices, pickup, or a default campus city '
+    'are acceptable labeled assumptions when no material price detail is missing. An exact order date is not '
+    'needed for standard menu pricing. When estimating two basic Chipotle entrées for a two-person order, '
+    'leave missing_details empty if a comparable local menu price is available. Set routine_estimate false '
+    'for rentals, travel, catering, quotes for '
+    'custom work, or any booking whose price depends on material unknown details. '
+    'Leave the recommendation to the reviewer.'
 )
-RENTAL = re.compile(r'\b(?:rent(?:al|ing)?|hire)\b', re.IGNORECASE)
+BOOKED_SERVICE = re.compile(
+    r'\b(?:rent(?:al|ing)?|hire|catering|catered|hotel|lodging|flights?|airfare|reservations?|tickets?)\b',
+    re.IGNORECASE,
+)
+ESTIMATE_VARIANCE = Decimal('0.20')
 
 
 def market_unavailable():
@@ -101,7 +119,7 @@ def search_market_prices(client, model, reasoning, request, messages):
         return market_unavailable()
     return compare_prices(
         request['amount'], json.loads(response.output_text), _source_urls(response.output),
-        require_availability=bool(RENTAL.search(' '.join([request['description'], *details]))),
+        require_availability=bool(BOOKED_SERVICE.search(' '.join([request['description'], *details]))),
     )
 
 
@@ -174,11 +192,13 @@ def compare_prices(requested_usd, research, source_urls, *, require_availability
     result = {'scope': scope, 'assumptions': assumptions, 'missing_details': missing_details,
               'prices': prices, 'options': options}
     requested = money(requested_usd)
+    estimates = [
+        money(option['total_usd']) for option in options
+        if option['price_type'] in ('total', 'benchmark') and option['availability'] != 'unavailable'
+    ]
+    if scope and estimates and research.get('routine_estimate') and not require_availability and not missing_details:
+        return _routine_price_assessment(requested, min(estimates), max(estimates), result)
     if len(prices) < 2 or not scope or assumptions or missing_details:
-        estimates = [
-            money(option['total_usd']) for option in options
-            if option['price_type'] in ('total', 'benchmark') and option['availability'] != 'unavailable'
-        ]
         if scope and estimates:
             low, high = min(estimates), max(estimates)
             relationship = 'above' if requested > high else 'below' if requested < low else 'within'
@@ -207,7 +227,24 @@ def compare_prices(requested_usd, research, source_urls, *, require_availability
             'summary': f'The requested ${requested:,.2f} is {relationship} the observed ${low:,.2f}–${high:,.2f} range for the comparable terms.'}
 
 
+def _routine_price_assessment(requested, low, high, result):
+    estimate = f'${low:,.2f}' if low == high else f'${low:,.2f}–${high:,.2f}'
+    if requested > high * (1 + ESTIMATE_VARIANCE):
+        status = 'above_estimate'
+        assessment = 'above the published estimate'
+    elif requested < low * (1 - ESTIMATE_VARIANCE):
+        status = 'below_estimate'
+        assessment = 'below the published estimate and may understate the cost'
+    else:
+        status = 'supported_estimate'
+        assessment = 'close to the published estimate'
+    return {
+        **result, 'status': status, 'estimated_low': f'{low:.2f}', 'estimated_high': f'{high:.2f}',
+        'summary': f'${requested:,.2f} is {assessment} of {estimate} for the stated comparison terms.',
+    }
+
+
 def add_market_evidence(evidence, market):
     evidence['market_price'] = market
-    if market['status'] != 'supported':
+    if market['status'] not in ('supported', 'supported_estimate'):
         evidence['missing'].append(market['summary'])

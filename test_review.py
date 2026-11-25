@@ -9,9 +9,15 @@ from review import DATA, load_records, evaluate, PurchaseRequest
 from agent import explain
 
 
+def historical_records():
+    budgets, ledger, policies = load_records()
+    budgets = [{**row, 'verified_on': date(2026, 11, 11)} for row in budgets]
+    return budgets, ledger, policies
+
+
 class ReviewTests(unittest.TestCase):
     def setUp(self):
-        self.b, self.l, self.p = load_records()
+        self.b, self.l, self.p = historical_records()
         self.today = date(2026, 11, 11)
         self.r = PurchaseRequest('Van rental', 'Club event travel', '450', 'Travel',
                                  self.today + timedelta(days=1), 'Example vendor', '$450 estimate')

@@ -27,6 +27,8 @@ A later regression test brought the suite to **30 passing tests**. It verified t
 
 The first-turn price assessment brought the suite to **31 passing tests**. With mocked web results, “I want to spend 300 on a van rental” put the $300 Travel balance beside an indicative price assessment. The benchmark used a sourced $19.95 day rate and $0.99 per mile for an assumed 100-mile trip, producing $118.95 before other charges. The request remained deferred while the rental terms were incomplete.
 
+The routine-price tests brought the suite to **33 passing tests**. A two-entrée menu estimate supported a $20 Chipotle request. The same evidence triggered deferral at $45 and at an implausibly low $2. Further checks covered escalation on a budget shortfall and deferral when the requested amount fit but the estimate exceeded the available balance. Historical fixtures keep the November 11 verification date. The current demo ledger was reconciled on November 25.
+
 ## Results from the November 20 deployment
 
 ### Hosted OpenAI and Supabase check

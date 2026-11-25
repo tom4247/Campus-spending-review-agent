@@ -86,7 +86,7 @@ class PurchaseRequest:
     comments: str = ''
 
 
-def review_evidence(request, budgets, ledger, policies, today, *, allow_incomplete=False):
+def review_evidence(request, budgets, ledger, policies, today, *, allow_incomplete=False, routine_purchase=False):
     missing, escalate, applied = [], [], []
     try:
         amount = money(request.amount)
@@ -104,7 +104,8 @@ def review_evidence(request, budgets, ledger, policies, today, *, allow_incomple
             raise ValueError('Select a known spending category.')
         missing.append('Confirm the spending category.')
 
-    for field in ('description', 'purpose', 'vendor'):
+    required_fields = ('description', 'vendor') if routine_purchase else ('description', 'purpose', 'vendor')
+    for field in required_fields:
         if not getattr(request, field).strip():
             missing.append(f'Provide {field}.')
     if policies['quote_required']:
@@ -112,7 +113,8 @@ def review_evidence(request, budgets, ledger, policies, today, *, allow_incomple
         if not request.quote.strip():
             missing.append('Provide the vendor quote or cost estimate.')
     if request.deadline is None:
-        missing.append('Provide the date needed.')
+        if not routine_purchase:
+            missing.append('Provide the date needed.')
     elif request.deadline < today:
         missing.append('Confirm a new deadline; the supplied date has passed.')
     applied.append(f"Records must be verified within {policies['max_record_age_days']} days.")
