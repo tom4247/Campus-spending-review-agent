@@ -321,6 +321,9 @@ class OpenAIChatTests(unittest.TestCase):
                 messages = [{'role': 'user', 'text': f'${amount} for two people from Chipotle'}]
                 result = review_chat(messages, 'mock-key', *historical_records(), date(2026, 11, 25))
                 evidence = result['evidence']
+                search_input = json.loads(create.call_args_list[1].kwargs['input'])
+                self.assertNotIn('amount', search_input['purchase'])
+                self.assertEqual(search_input['requester_details'], ['the requested amount for two people from Chipotle'])
                 self.assertEqual(result['decision'], decision)
                 self.assertEqual(evidence['available'], '1900.00')
                 self.assertEqual(evidence['market_price']['status'], status)
@@ -343,10 +346,11 @@ class OpenAIChatTests(unittest.TestCase):
         outcome = {'decision': 'DEFER', 'reason': 'No sourced comparison.', 'follow_up': ''}
         with patch('openai.OpenAI') as client:
             create = client.return_value.__enter__.return_value.responses.create
-            create.side_effect = [SimpleNamespace(status='completed', output_text=json.dumps(fields)), response,
+            create.side_effect = [SimpleNamespace(status='completed', output_text=json.dumps(fields)), response, response,
                                   SimpleNamespace(status='completed', output_text=json.dumps(outcome))]
             result = review_chat([{'role': 'user', 'text': '$45 for two people from Chipotle'}],
                                  'mock-key', *historical_records(), date(2026, 11, 25))
+            self.assertIn('Focus on a single local menu', create.call_args_list[2].kwargs['instructions'])
         self.assertEqual(result['decision'], 'DEFER')
         self.assertEqual(result['follow_up'], '')
         self.assertEqual(result['evidence']['market_price']['options'], [])
