@@ -187,7 +187,7 @@ Open **Review a purchase in chat** and send “Can we rent a $450 van from Examp
 
 ### Check a purchase price
 
-For a van rental, include the pickup city, vehicle class, rental dates or duration, mileage, and what the quote covers. OpenAI searches for comparable public provider totals. **Market price check** shows the comparison terms, prices, and source links. The app needs two comparable provider totals to support a price. If the requested amount exceeds that range or a comparison is unavailable, the chat asks for more evidence before recommending approval. Already paid expenses are recorded through the payment flow.
+For a van rental, include the pickup city, vehicle class, pickup and return timing, mileage, and what the quote covers. The agent searches for nearby providers and displays their locations, published prices, availability status, and direct provider links under **Market price check**. When a booking form is needed, the provider is still listed. The app uses two comparable rental totals with confirmed availability to support a price. Already paid expenses are recorded through the payment flow.
 
 ### Report a payment
 

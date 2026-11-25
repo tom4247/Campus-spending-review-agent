@@ -23,6 +23,8 @@ The updated suite passed **28 automated tests**, including three price-check tes
 
 The suite now passes **29 tests**. A follow-up test verifies that a confirmed deadline is visible when the price check is unavailable. The running preview accepted `tomorrow`, `two days from now`, and `11/27/26` in sequence and kept each newly supplied deadline on the latest review.
 
+A later regression test brought the suite to **30 passing tests**. It verified that a rental search retains sourced nearby providers with public rates or quote forms, excludes unverified availability from the comparison, and keeps the follow-up from asking the requester to find their own quotes.
+
 ## Results from the November 20 deployment
 
 ### Hosted OpenAI and Supabase check

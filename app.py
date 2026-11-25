@@ -63,6 +63,8 @@ def display_chat_message(message):
         }[decision]
         if decision == 'DEFER' and market and market['status'] == 'unavailable':
             heading = 'DEFER · Price check unavailable'
+        elif decision == 'DEFER' and market and market['status'] == 'insufficient_sources':
+            heading = 'DEFER · Price comparison incomplete'
         st.markdown(f'**{heading}**')
         if deadline := evidence.get('deadline'):
             needed_by = date.fromisoformat(deadline)
@@ -78,9 +80,23 @@ def display_chat_message(message):
                 st.text(market['summary'])
                 if market.get('scope'):
                     st.text(market['scope'])
-                for index, price in enumerate(market['prices'], 1):
-                    st.text(f"{price['provider']} · ${Decimal(price['total_usd']):,.2f}\n{price['terms']}")
-                    st.link_button(f'Open price source {index}', price['url'])
+                for index, option in enumerate(market.get('options', market['prices']), 1):
+                    provider = option['provider']
+                    if location := option.get('location'):
+                        provider += f' · {location}'
+                    if option.get('price_type') == 'quote_required':
+                        price_label = 'Exact price requires a provider quote'
+                    else:
+                        price = f"${Decimal(option['total_usd']):,.2f}"
+                        price_label = f'Published starting rate {price}' if option.get('price_type') == 'starting_rate' else price
+                    availability = {
+                        'confirmed': 'Availability confirmed for the requested dates',
+                        'unverified': 'Availability unverified',
+                        'unavailable': 'Unavailable for the requested dates',
+                    }.get(option.get('availability'))
+                    details = [provider, price_label, availability, option['terms']]
+                    st.text('\n'.join(detail for detail in details if detail))
+                    st.link_button(f'Open provider page {index}', option['url'])
 
         with st.expander('Verified checks and interpreted request'):
             if 'available' in evidence:

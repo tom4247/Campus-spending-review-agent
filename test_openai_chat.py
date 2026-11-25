@@ -15,7 +15,7 @@ from review import load_records
 def price_response(totals, scope, *, missing_details='', unusable_last=False):
     prices = [
         {'provider': provider, 'total_usd': total, 'url': f'https://{provider}.example/price',
-         'terms': scope, 'price_type': 'total'}
+         'terms': scope, 'price_type': 'total', 'location': 'Pittsburgh', 'availability': 'confirmed'}
         for provider, total in zip(('first', 'second', 'third'), totals)
     ]
     sourced = prices[:-1] if unusable_last else prices
@@ -207,8 +207,41 @@ class OpenAIChatTests(unittest.TestCase):
         result = compare_prices('300', research, cited)
         self.assertEqual(result['status'], 'insufficient_sources')
         self.assertEqual([price['total_usd'] for price in result['prices']], ['280.00'])
+        self.assertEqual(len(result['options']), 2)
 
         research['missing_details'] = 'How many days and miles do you need?'
         result = compare_prices('300', research, cited)
         self.assertEqual(result['status'], 'needs_details')
         self.assertEqual(result['summary'], research['missing_details'])
+
+    def test_rental_search_returns_nearby_options_without_asking_user_to_find_quotes(self):
+        fields = {
+            'description': 'Cargo van rental', 'purpose': 'Club trip', 'amount': '300.00', 'category': 'Travel',
+            'deadline': '2026-11-27', 'vendor': 'Local Vans', 'quote': '$300 including taxes and fees',
+        }
+        scope = 'One-day Pittsburgh cargo van rental.'
+        response = price_response(('240', '260', ''), scope)
+        research = json.loads(response.output_text)
+        research['prices'][0]['availability'] = 'unverified'
+        research['prices'][1]['price_type'] = 'starting_rate'
+        research['prices'][2]['price_type'] = 'quote_required'
+        research['prices'][2]['availability'] = 'unverified'
+        response.output_text = json.dumps(research)
+        outcome = {'decision': 'DEFER', 'reason': 'These providers need availability checks.',
+                   'follow_up': 'Can you find other comparable quotes yourself?'}
+        with patch('openai.OpenAI') as client:
+            create = client.return_value.__enter__.return_value.responses.create
+            create.side_effect = [
+                SimpleNamespace(status='completed', output_text=json.dumps(fields)), response,
+                SimpleNamespace(status='completed', output_text=json.dumps(outcome)),
+            ]
+            messages = [{'role': 'user', 'text': 'We need a one-day Pittsburgh cargo van rental in two days.'}]
+            result = review_chat(messages, 'mock-key', *load_records(), date(2026, 11, 25))
+
+        market = result['evidence']['market_price']
+        self.assertEqual(market['status'], 'insufficient_sources')
+        self.assertEqual(market['prices'], [])
+        self.assertEqual([option['price_type'] for option in market['options']],
+                         ['total', 'starting_rate', 'quote_required'])
+        self.assertEqual(market['options'][-1]['total_usd'], '')
+        self.assertEqual(result['follow_up'], '')

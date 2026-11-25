@@ -268,11 +268,12 @@ class ChatWorkflowTests(unittest.TestCase):
     def test_chat_displays_price_check_with_source_links(self):
         settings = {'OPENAI_CHAT_ENABLED': 'true', 'OPENAI_API_KEY': 'mock-key',
                     'SUPABASE_URL': '', 'SUPABASE_SECRET_KEY': ''}
-        market = {'status': 'above_range', 'summary': 'The $300 quote is above the observed range.',
-                  'scope': 'Pittsburgh cargo vans for one day.',
-                  'prices': [{'provider': 'Comparable Vans', 'total_usd': '250.00',
-                              'terms': 'Same class, date, and mileage.',
-                              'url': 'https://comparable.example/cargo-van'}]}
+        market = {'status': 'insufficient_sources', 'summary': 'The search found nearby providers.',
+                  'scope': 'Pittsburgh cargo vans for one day.', 'prices': [],
+                  'options': [{'provider': 'Comparable Vans', 'total_usd': '',
+                               'price_type': 'quote_required', 'availability': 'unverified',
+                               'location': 'Pittsburgh', 'terms': 'Enter dates for a quote.',
+                               'url': 'https://comparable.example/cargo-van'}]}
         result = {'decision': 'DEFER', 'reason': 'Check the quoted price.', 'follow_up': 'What is included?',
                   'request': {'description': 'Van rental'},
                   'evidence': {'escalation_reasons': [], 'missing': [market['summary']], 'rules': [],
@@ -284,6 +285,7 @@ class ChatWorkflowTests(unittest.TestCase):
             self.assertFalse(app.exception)
             self.assertTrue(any(item.label == 'Market price check' for item in app.expander))
             self.assertTrue(any(market['summary'] in item.value for item in app.text))
+            self.assertTrue(any('Exact price requires a provider quote' in item.value for item in app.text))
             self.assertEqual(app.get('link_button')[0].proto.url, 'https://comparable.example/cargo-van')
 
     def test_date_stays_visible_when_price_check_is_unavailable(self):

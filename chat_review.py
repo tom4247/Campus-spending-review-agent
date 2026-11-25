@@ -126,8 +126,10 @@ def review_with_model(messages, budgets, ledger, policies, today, generate, comp
         'outcomes, leave follow_up empty. Use the verified deadline and ask about it only if the verified '
         'missing items identify a deadline problem. Budget fit alone is insufficient. If market price evidence '
         'is present, explain whether it supports the quoted price. For an inconclusive or above-range price, '
-        'defer and ask for the missing comparison details, a reason for the price, or comparable quote links, '
-        'unless a separate issue requires escalation. Cite only prices in the supplied market evidence. '
+        'defer unless a separate issue requires escalation. Ask only for missing request details the user '
+        'can supply. Never ask the user to search for providers or find quote links. Describe the provider '
+        'options found by the search and distinguish confirmed totals from starting rates and quote-form links. '
+        'Cite only prices in the supplied market evidence. '
         'Consider whether the size or quantity makes sense for the requester’s stated purpose and ask for '
         'a justification if the fit is unclear. '
         'Use the verified amounts and do not calculate new '
@@ -143,7 +145,11 @@ def review_with_model(messages, budgets, ledger, policies, today, generate, comp
     if not isinstance(result['reason'], str) or not result['reason'].strip():
         raise ChatReviewError('The model did not give a reason for its decision. Ask your treasurer.')
     if result['decision'] == 'DEFER':
-        if not isinstance(result['follow_up'], str) or not result['follow_up'].strip():
+        market_status = evidence.get('market_price', {}).get('status')
+        if market_status in ('insufficient_sources', 'unavailable'):
+            result['reason'] = 'The price comparison is incomplete.'
+            result['follow_up'] = ''
+        elif not isinstance(result['follow_up'], str) or not result['follow_up'].strip():
             raise ChatReviewError('The model did not say what is needed to continue. Try again or use Manual review.')
     else:
         result['follow_up'] = ''
