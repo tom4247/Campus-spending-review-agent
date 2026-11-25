@@ -120,7 +120,7 @@ def display_chat_message(message):
 
 
 st.subheader('Review a purchase in chat')
-st.caption('Describe what you want to buy and the price. Routine purchases can use a published price estimate.')
+st.caption('Describe what you want to buy and the price. Routine purchases can use a published price estimate without a separate quote.')
 if chat_enabled:
     disclosure = 'Chat sends fictional purchase details to OpenAI for review.'
     if logging_enabled:

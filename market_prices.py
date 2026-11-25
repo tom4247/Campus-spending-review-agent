@@ -3,7 +3,7 @@
 import json
 import re
 from decimal import Decimal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from review import money
 
@@ -53,8 +53,11 @@ SEARCH_INSTRUCTIONS = (
     'with 100 miles as a reference for an unspecified van rental. Use stated terms over defaults. Base the '
     'search on relevant comparable providers or official published rate guides, and include the local '
     'branch or service area when known. Give the source page where the price was actually published. '
+    'Copy each exact URL from the web search results, including the full path and any item identifiers. '
+    'Use the search result page itself when it displays the price, without constructing another URL. '
     'When the requester names a restaurant and party size, find that restaurant’s local priced menu and '
     'estimate one standard entree per person. Assume pickup unless the requester specifies delivery. '
+    'Look up the menu independently of the amount requested. '
     'Use the provider’s own site or a current, local priced menu or ordering page for that provider, '
     'labeling pickup versus delivery and any excluded taxes, tips, or extras. '
     'For van rentals, compare rental period, included mileage, taxes, fees, and coverage. For goods, compare '
@@ -74,8 +77,9 @@ SEARCH_INSTRUCTIONS = (
     'Exclude the requester’s own quote and membership-only pricing unless their eligibility is confirmed. '
     'Retain useful local options even if exact totals are unavailable. Use one common reference scenario, '
     'list any assumptions, and set scope to the comparison terms. Set routine_estimate true only for a '
-    'standard purchase with a known quantity and directly comparable published prices, including an ordinary '
-    'restaurant order for a stated number of people. Ordinary menu choices, pickup, or a default campus city '
+    'standard purchase with a known quantity that can be priced from a published menu or catalog, including '
+    'an ordinary restaurant order for a stated number of people. Set it true even if search did not find '
+    'a price for that routine purchase. Ordinary menu choices, pickup, or a default campus city '
     'are acceptable labeled assumptions when no material price detail is missing. An exact order date is not '
     'needed for standard menu pricing. When estimating two basic Chipotle entrées for a two-person order, '
     'leave missing_details empty if a comparable local menu price is available. Set routine_estimate false '
@@ -135,19 +139,34 @@ def _source_urls(items):
     return urls
 
 
+def _page_key(url):
+    try:
+        page = urlsplit(url)
+    except ValueError:
+        return None
+    if page.scheme != 'https' or not page.hostname or page.username or page.password:
+        return None
+    query = tuple(
+        (name, value) for name, value in parse_qsl(page.query, keep_blank_values=True)
+        if not name.startswith('utm_')
+    )
+    return page.netloc.lower().removeprefix('www.'), page.path.rstrip('/'), query
+
+
 def _sourced_options(rows, source_urls):
     options = []
     domains = set()
     providers = set()
+    source_pages = {key: url for url in source_urls if (key := _page_key(url)) is not None}
     price_order = {'total': 0, 'benchmark': 1, 'starting_rate': 2, 'quote_required': 3}
     ranked = sorted(rows, key=lambda item: (
         item['availability'] == 'unavailable', price_order[item['price_type']], item['availability'] != 'confirmed',
     ))
     for item in ranked:
-        url = item['url']
-        if url not in source_urls:
-            continue
         try:
+            url = source_pages.get(_page_key(item['url']))
+            if url is None:
+                continue
             source = urlsplit(url)
             domain = source.hostname.removeprefix('www.') if source.hostname else ''
             components = item.get('rate_components', [])
@@ -173,7 +192,8 @@ def _sourced_options(rows, source_urls):
             continue
         domains.add(domain)
         providers.add(provider)
-        options.append({**item, 'total_usd': f'{amount:.2f}' if amount is not None else '', 'calculation': calculation})
+        options.append({**item, 'url': url, 'total_usd': f'{amount:.2f}' if amount is not None else '',
+                        'calculation': calculation})
         if len(options) == 4:
             break
     return options
@@ -189,14 +209,15 @@ def compare_prices(requested_usd, research, source_urls, *, require_availability
     scope = research['scope'].strip()
     assumptions = research.get('assumptions', '').strip()
     missing_details = research['missing_details'].strip()
+    routine = bool(scope and research.get('routine_estimate') and not require_availability and not missing_details)
     result = {'scope': scope, 'assumptions': assumptions, 'missing_details': missing_details,
-              'prices': prices, 'options': options}
+              'prices': prices, 'options': options, 'routine_estimate': routine}
     requested = money(requested_usd)
     estimates = [
         money(option['total_usd']) for option in options
         if option['price_type'] in ('total', 'benchmark') and option['availability'] != 'unavailable'
     ]
-    if scope and estimates and research.get('routine_estimate') and not require_availability and not missing_details:
+    if routine and estimates:
         return _routine_price_assessment(requested, min(estimates), max(estimates), result)
     if len(prices) < 2 or not scope or assumptions or missing_details:
         if scope and estimates:

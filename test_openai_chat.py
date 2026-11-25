@@ -308,6 +308,7 @@ class OpenAIChatTests(unittest.TestCase):
                 research['prices'][0].update(
                     provider='Chipotle', price_type='benchmark', availability='not_applicable',
                     rate_components=[{'label': 'Chicken entrée', 'unit_usd': '8.45', 'quantity': 2}],
+                    url='https://www.first.example/price/?utm_source=search#pickup',
                 )
                 response.output_text = json.dumps(research)
                 outcome = {'decision': decision, 'reason': 'Compared with the published menu.',
@@ -323,12 +324,33 @@ class OpenAIChatTests(unittest.TestCase):
                 self.assertEqual(result['decision'], decision)
                 self.assertEqual(evidence['available'], '1900.00')
                 self.assertEqual(evidence['market_price']['status'], status)
+                self.assertEqual(evidence['market_price']['options'][0]['url'], 'https://first.example/price')
                 self.assertTrue(evidence['routine_purchase'])
                 self.assertIn('Published price estimate $16.90', result['request']['quote'])
                 self.assertNotIn('Provide the date needed.', evidence['missing'])
                 self.assertNotIn('Provide purpose.', evidence['missing'])
                 allowed = json.loads(create.call_args.kwargs['input'])['allowed_outcomes']
                 self.assertEqual('APPROVE' in allowed, decision == 'APPROVE')
+
+    def test_routine_search_without_a_verified_listing_does_not_ask_for_a_deadline(self):
+        fields = {'description': 'Two meals', 'purpose': '', 'amount': '45', 'category': 'Events',
+                  'deadline': '', 'vendor': 'Chipotle', 'quote': ''}
+        response = price_response(('19',), 'Two meals for pickup.')
+        research = json.loads(response.output_text)
+        research['routine_estimate'] = True
+        research['prices'][0]['url'] += '?location=different'
+        response.output_text = json.dumps(research)
+        outcome = {'decision': 'DEFER', 'reason': 'No sourced comparison.', 'follow_up': ''}
+        with patch('openai.OpenAI') as client:
+            create = client.return_value.__enter__.return_value.responses.create
+            create.side_effect = [SimpleNamespace(status='completed', output_text=json.dumps(fields)), response,
+                                  SimpleNamespace(status='completed', output_text=json.dumps(outcome))]
+            result = review_chat([{'role': 'user', 'text': '$45 for two people from Chipotle'}],
+                                 'mock-key', *historical_records(), date(2026, 11, 25))
+        self.assertEqual(result['decision'], 'DEFER')
+        self.assertEqual(result['follow_up'], '')
+        self.assertEqual(result['evidence']['market_price']['options'], [])
+        self.assertNotIn('Provide the date needed.', result['evidence']['missing'])
 
     def test_routine_estimate_still_respects_budget_and_required_escalation(self):
         fields = {'description': 'Two meals', 'purpose': '', 'amount': '20', 'category': 'Events',

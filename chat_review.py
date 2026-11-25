@@ -114,18 +114,22 @@ def review_with_model(messages, budgets, ledger, policies, today, generate, comp
     market = None
     if latest and fields['description'] and evidence['amount'] is not None:
         market = compare_with_market(fields)
-        if market['status'] in ('supported_estimate', 'above_estimate', 'below_estimate'):
-            low, high = Decimal(market['estimated_low']), Decimal(market['estimated_high'])
-            if not fields['quote']:
-                estimate = f'${low:,.2f}' if low == high else f'${low:,.2f}–${high:,.2f}'
-                fields['quote'] = f"Published price estimate {estimate} · {market['scope']}"
-                request.quote = fields['quote']
+        if market.get('routine_estimate'):
+            high = None
+            if 'estimated_high' in market:
+                low, high = Decimal(market['estimated_low']), Decimal(market['estimated_high'])
+                if not fields['quote']:
+                    estimate = f'${low:,.2f}' if low == high else f'${low:,.2f}–${high:,.2f}'
+                    fields['quote'] = f"Published price estimate {estimate} · {market['scope']}"
+                    request.quote = fields['quote']
             evidence = review_evidence(request, budgets, ledger, policies, today, allow_incomplete=True, routine_purchase=True)
             evidence['routine_purchase'] = True
-            if market['status'] == 'supported_estimate' and 'available' in evidence and high > Decimal(evidence['available']):
+            if high is not None and 'available' in evidence and high > Decimal(evidence['available']):
                 evidence['missing'].append('The high end of the price estimate exceeds the available budget. Confirm the final total.')
 
     request_missing = bool(evidence['missing'])
+    if evidence.get('routine_purchase') and evidence['missing'] == ['Provide the vendor quote or cost estimate.']:
+        request_missing = False
     if market:
         add_market_evidence(evidence, market)
 
