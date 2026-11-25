@@ -12,6 +12,22 @@ from chat_review import ChatReviewError
 from review import load_records
 
 
+def price_response(totals, scope, *, missing_details='', unusable_last=False):
+    prices = [
+        {'provider': provider, 'total_usd': total, 'url': f'https://{provider}.example/price',
+         'terms': scope, 'price_type': 'total'}
+        for provider, total in zip(('first', 'second', 'third'), totals)
+    ]
+    sourced = prices[:-1] if unusable_last else prices
+    web_search = SimpleNamespace(type='web_search_call', action=SimpleNamespace(
+        sources=[SimpleNamespace(url=price['url']) for price in sourced],
+    ))
+    return SimpleNamespace(
+        status='completed', output=[web_search],
+        output_text=json.dumps({'scope': scope, 'missing_details': missing_details, 'prices': prices}),
+    )
+
+
 class OpenAIChatTests(unittest.TestCase):
     def test_billing_and_spend_limits_are_identified_without_retry(self):
         for code, kind, expected in (
@@ -109,3 +125,90 @@ class OpenAIChatTests(unittest.TestCase):
             self.assertEqual(result['decision'], 'DEFER')
             self.assertEqual(result['follow_up'], decision['follow_up'])
             self.assertIn('Provide vendor.', result['evidence']['missing'])
+
+    def test_chat_follow_up_resolves_relative_and_us_deadline(self):
+        fields = {
+            'description': 'Posters', 'purpose': 'Club showcase', 'amount': '70.00',
+            'category': 'Marketing', 'deadline': '', 'vendor': 'Campus Print', 'quote': '$70',
+        }
+        proposed = {'role': 'user', 'text': 'Campus Print quoted $70 for showcase posters. Use Marketing.'}
+        question = {'role': 'assistant', 'text': 'When do you need them?'}
+        for reply, expected_date in (
+            ('tomorrow', '2026-11-26'),
+            ('Tomorrow, please.', '2026-11-26'),
+            ('in two days', '2026-11-27'),
+            ('two days from now', '2026-11-27'),
+            ('11/27/26', '2026-11-27'),
+            ('I need them by 11/27/2026.', '2026-11-27'),
+            ('The quote was issued on 11/27/26.', None),
+            ('2/30/26', None),
+        ):
+            with self.subTest(reply=reply), patch('openai.OpenAI') as client:
+                outcome = {'decision': 'APPROVE', 'reason': 'The expense fits the verified budget.', 'follow_up': ''}
+                extraction = SimpleNamespace(status='completed', output_text=json.dumps(fields))
+                if expected_date is None:
+                    outcome = {'decision': 'DEFER', 'reason': 'The deadline is missing.', 'follow_up': 'When is it needed?'}
+                create = client.return_value.__enter__.return_value.responses.create
+                responses = [extraction]
+                if expected_date:
+                    responses.append(price_response(('60', '80'), 'The same poster sizes and print quantity.'))
+                responses.append(SimpleNamespace(status='completed', output_text=json.dumps(outcome)))
+                create.side_effect = responses
+                messages = [proposed, question, {'role': 'user', 'text': reply}]
+                result = review_chat(messages, 'mock-key', *load_records(), date(2026, 11, 25))
+                evidence = json.loads(create.call_args.kwargs['input'])['verified_evidence']
+                self.assertEqual(evidence['deadline'], expected_date)
+                self.assertEqual(result['request']['deadline'], expected_date or '')
+                self.assertEqual('Provide the date needed.' in evidence['missing'], expected_date is None)
+
+    def test_price_evidence_gates_approval_after_budget_checks_pass(self):
+        fields = {
+            'description': 'Cargo van rental', 'purpose': 'Club travel', 'amount': '300.00', 'category': 'Travel',
+            'deadline': '2026-11-27', 'vendor': 'Local Vans', 'quote': '$300 including taxes and fees',
+        }
+        text = ('Local Vans quoted $300 all-in for a cargo van in Pittsburgh for one day, including 100 miles. '
+                'We need it on 11/27/26. Use Travel.')
+        scope = 'One-day Pittsburgh cargo van rental with 100 miles and applicable taxes and fees.'
+        for totals, status, excluded_last in (
+            (('260', '325'), 'supported', False),
+            (('220', '260', '500'), 'above_range', True),
+            (('260', '325'), 'insufficient_sources', True),
+        ):
+            with self.subTest(status=status), patch('openai.OpenAI') as client:
+                response = price_response(totals, scope, unusable_last=excluded_last)
+                decision = 'APPROVE' if status == 'supported' else 'DEFER'
+                outcome = {'decision': decision, 'reason': 'Reviewed market pricing.',
+                           'follow_up': '' if decision == 'APPROVE' else 'Can you share a comparable quote?'}
+                create = client.return_value.__enter__.return_value.responses.create
+                create.side_effect = [
+                    SimpleNamespace(status='completed', output_text=json.dumps(fields)),
+                    response,
+                    SimpleNamespace(status='completed', output_text=json.dumps(outcome)),
+                ]
+                result = review_chat([{'role': 'user', 'text': text}], 'mock-key', *load_records(), date(2026, 11, 25))
+                search = create.call_args_list[1].kwargs
+                self.assertEqual(search['tools'][0]['type'], 'web_search')
+                self.assertEqual(search['include'], ['web_search_call.action.sources'])
+                self.assertEqual(create.call_count, 3)
+                self.assertEqual(result['decision'], decision)
+                market = result['evidence']['market_price']
+                self.assertEqual(market['status'], status)
+                self.assertEqual(len(market['prices']), len(totals) - int(excluded_last))
+                allowed = json.loads(create.call_args.kwargs['input'])['allowed_outcomes']
+                self.assertEqual('APPROVE' in allowed, status == 'supported')
+
+    def test_starting_rate_and_missing_rental_terms_cannot_support_price(self):
+        from market_prices import compare_prices
+
+        response = price_response(('19.95', '280'), 'One-day Pittsburgh van rental.')
+        research = json.loads(response.output_text)
+        research['prices'][0]['price_type'] = 'starting_rate'
+        cited = {price['url'] for price in research['prices']}
+        result = compare_prices('300', research, cited)
+        self.assertEqual(result['status'], 'insufficient_sources')
+        self.assertEqual([price['total_usd'] for price in result['prices']], ['280.00'])
+
+        research['missing_details'] = 'How many days and miles do you need?'
+        result = compare_prices('300', research, cited)
+        self.assertEqual(result['status'], 'needs_details')
+        self.assertEqual(result['summary'], research['missing_details'])

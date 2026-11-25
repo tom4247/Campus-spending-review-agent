@@ -4,7 +4,7 @@
 
 ## What it does
 
-A requester describes one proposed purchase in chat. OpenAI extracts the item, purpose, USD amount, spending category, needed-by date, vendor, and quote. Python reads the synthetic budget, ledger, and policy records and calculates **available funds = allocation − paid expenses − outstanding commitments**. The model uses those verified facts to choose a recommendation and explain it. Python limits the available outcomes when a mandatory rule applies or required evidence is missing.
+A requester describes a purchase in chat. OpenAI extracts the item, purpose, USD amount, spending category, needed-by date, vendor, and quote. Python reads the session’s synthetic budget, ledger, and policy records and calculates **available funds = allocation − paid expenses − outstanding commitments**. For a complete request that passes the budget and policy checks, the agent searches public provider prices and displays its sources. The model chooses a recommendation using this evidence. Python withholds APPROVE when the price exceeds the comparable range or price evidence is insufficient.
 
 | Decision | What happens next |
 |---|---|
@@ -18,10 +18,12 @@ The sample policy requires additional authorization for requests **at or above $
 
 Chat is the main interface. **Manual review** opens the rule-based form and works while chat is paused or unavailable. To activate OpenAI chat with GPT-6 Luna, set a working `OPENAI_API_KEY` in Streamlit Secrets. Set `OPENAI_CHAT_ENABLED = false` to pause chat.
 
-With Supabase configured, each new chat request gets one `purchase_reviews` row. Follow-ups update its transcript, latest status, verified budget snapshot, and next action. Streamlit shows history for the current session. Project administrators can inspect past sessions in Supabase. Manual form inputs are logged separately in `purchase_submissions`.
+The requester can adjust an allocation by typing `Update the Travel budget to $2,200`, or record a paid expense directly by typing `We spent $300 on Travel`. They can also report what they paid for the active reviewed purchase. Each paid entry updates the balance for later requests in the same browser session.
+
+With Supabase configured, each request gets a `purchase_reviews` row with its latest recommendation, budget snapshot, and any reported payment. Budget adjustments and direct expenses are recorded in `purchase_submissions`. Streamlit shows review history and updated balances for the current session.
 
 ## Boundaries and evaluation
 
 The prototype uses synthetic records and illustrative policies. Authorized people handle spending approval, purchases, payments, ledger changes, and exceptions. The agent produces and records a recommendation. The requester handles escalation delivery.
 
-The [evaluation](AGENT_EVALUATION.md) reports the manual-policy replay, offline chat checks, and the prepared live chat test set. The [known weaknesses](KNOWN_WEAKNESSES.md) identify which issues were reproduced and which still require live testing.
+In a hosted trial, 12 of 12 comparable decision labels matched, including all four comparable mandatory escalations. All 14 prompts shared one chat. The original 14-case hit rate remains unverified because it requires budget evidence and specific stale-record and two-turn checks. The [evaluation](AGENT_EVALUATION.md) includes the observed outcomes, a manual-review score of 11/12, and 29 passing local automated tests. See [known weaknesses](KNOWN_WEAKNESSES.md) for reproduced issues.

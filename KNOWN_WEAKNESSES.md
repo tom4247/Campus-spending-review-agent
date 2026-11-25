@@ -1,6 +1,6 @@
 # Known weaknesses
 
-**Version:** Chat-first reviewer using OpenAI GPT-6 Luna. Review recommendations are advisory. The treasurer or another authorized reviewer makes the final spending decision.
+The hosted trial used the chat-first OpenAI deployment at `e90d812`, with GPT-6 Luna as the default. The payment reporting feature was tested locally. The treasurer or another authorized reviewer makes the final spending decision.
 
 ## Reproduced on the current manual reviewer
 
@@ -22,12 +22,14 @@ For the first four probes, the reason was:
 
 | Weakness | What it means for the current version |
 |---|---|
-| **Chat depends on API access.** | OpenAI chat requires a funded API key. **Manual review** works without an API key. Live accuracy is still unmeasured. |
+| **Chat depends on API access.** | An earlier hosted attempt returned HTTP 429. The app distinguishes credit and spend-limit errors from temporary rate limits when OpenAI supplies a diagnostic code or type. It retries once when a temporary error specifies a wait of up to three seconds. **Manual review** works without an API key. |
+| **Hosted evidence is limited to a single conversation.** | 12 of 12 comparable decision labels matched. The [hosted trial](AGENT_EVALUATION.md#live-chat-test-set) verified the final structured review. The earlier budget snapshots, stale-record response, and two-turn response remain unverified in the hosted app. |
 | **Checks depend on how the model interprets the request.** | Python enforces spending rules against the extracted amount and category. It cannot independently establish that the extraction is correct. Ambiguous dates, split costs, wrong categories, and corrections need live testing. |
-| **Quote and vendor evidence is unverified.** | The model is instructed to ask about inconsistent quotes or categories. The chat path has no independent quote-total comparison, document verification, or vendor check. Treat these as model-dependent behaviors until the live cases are run. |
+| **User-supplied quotes and vendors still need verification.** | The public price check compares the requested amount with other provider prices. It cannot authenticate the vendor or the requester’s quote. In C12, chat asked the requester to resolve a $200 request and $350 quote while describing $350 as the verified request amount. |
+| **Public prices are not always comparable.** | Rental prices can depend on the booking dates, local inventory, mileage, insurance, and fees. The review needs two comparable public totals to support the price. Some expenses still need independently obtained quotes and treasurer review. |
 | **The explanation is generated.** | Structured validation checks the outcome and requires a reason and a follow-up for DEFER. It does not validate every wording or claim. Compare the rationale with the verified figures and policy checks. |
-| **One purchase per conversation.** | Follow-ups reuse the same review ID and all previous turns. Start a new chat for a different purchase so the model does not mix details and update the earlier review. |
-| **Each turn depends on two model calls.** | A slow or failed extraction or decision can leave the request unavailable. The app shows the error and offers Manual review. |
+| **Different purchases need to be separated explicitly.** | Follow-ups reuse the active review ID. In the hosted trial, 14 prompts shared one review ID, and the last reply cited earlier conversation context. Choose **Start a new chat request** when switching purchases. The running balance stays in the browser session. |
+| **Purchase reviews depend on model calls.** | A slow or failed extraction or decision can leave the request unavailable. Otherwise approvable reviews add a web-search request. A failed search prevents the chat from recommending approval on price grounds. |
 | **Chat text leaves the browser session.** | Chat sends the conversation to OpenAI and, when configured, saves it in Supabase. The public demo is intended for fictional data. |
 
 ## Budget, authorization, and workflow
@@ -37,11 +39,11 @@ For the first four probes, the reason was:
 | **Budget accuracy depends on reconciliation.** | Missing and differently identified duplicate commitments distort the balance. A recent verification date alone does not establish that every obligation was reconciled. |
 | **Demo records age.** | The bundled records were verified November 11, 2026. On November 26 they exceed the 14-day window. An otherwise routine request can then defer until the records are reconciled. |
 | **One purchase, one category.** | The app does not allocate line items across categories or combine related requests. Separate requests can miss an authorization threshold that applies to their combined cost. |
-| **Reviews do not reserve funds.** | Multiple requests can each appear affordable against the same ledger balance. For example, two $200 Travel requests each use the same $300 budget snapshot. |
+| **The running balance depends on reported payments.** | Several recommendations can rely on the same balance until the user records a payment. The app accepts one reported total per purchase review and has no receipt verification, installment tracking, or link to commitments already in the source ledger. |
 | **Rules are illustrative.** | The configured restrictions do not capture a real club’s full policy. Deadlines are dates, so the agent cannot distinguish two requests due at different times on the same day. |
 | **Malformed source records can block all reviews.** | CSV and policy files are loaded together. A duplicate ledger ID or malformed policy entry can stop the app before a request is reviewed. |
 | **Escalation is a manual handoff.** | The copyable summary includes the relevant concern and reviewer role. It must still be sent by the requester. The app does not track receipt or the human’s final decision. |
-| **History is session-scoped in Streamlit.** | Chat history is durable in Supabase, but the public UI lists only the current browser session’s reviews. It has no treasurer login, cross-session history view, or workflow for reopening an older request. Project administrators can inspect rows in Supabase. |
+| **History is session-scoped in Streamlit.** | A new browser session starts with the sample budget. The public demo has no treasurer login or cross-session budget view. When configured, Supabase retains review and payment records for project administrators. |
 | **One latest snapshot per review.** | Follow-ups retain the text transcript and overwrite the latest structured decision and budget snapshot. The table does not retain a separate structured record for every revision. |
 | **Database failures and incomplete sessions.** | A review can complete in the UI even if Supabase does not confirm the write. An interrupted request can leave a PENDING record after the first write. Manual submissions store inputs separately from chat reviews. |
 | **Old results can still be visible.** | Earlier recommendations remain in the chat transcript. The latest result reflects the most recent submitted details and loaded records. |

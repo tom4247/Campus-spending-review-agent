@@ -7,7 +7,10 @@ from dotenv import load_dotenv
 from review import load_records, budget_overview, PurchaseRequest, evaluate
 from agent import review_chat
 from chat_review import ChatReviewError
-from purchase_chat import build_reply, escalation_summary, review_snapshot
+from purchase_chat import (
+    PAYMENT_COMMAND, SpendingDetailsNeeded, apply_budget_command, budget_command, build_reply, chat_transcript,
+    confirm_payment, escalation_summary, review_snapshot, session_budgets, session_ledger,
+)
 from submission_log import record_submission, save_review
 
 load_dotenv()
@@ -41,7 +44,7 @@ except (OSError, ValueError, KeyError, TypeError) as exc:
 
 def display_chat_message(message):
     with st.chat_message(message['role']):
-        if message['role'] == 'user':
+        if message['role'] == 'user' or message.get('account_notice') or message.get('payment_notice'):
             st.text(message['text'])
             return
         if 'error' in message:
@@ -51,26 +54,42 @@ def display_chat_message(message):
 
         result = message['result']
         decision = result['decision']
+        evidence = result['evidence']
+        market = evidence.get('market_price')
         heading = {
             'APPROVE': 'APPROVE · Ready for treasurer review',
             'DEFER': 'DEFER · More information needed',
             'ESCALATE': 'ESCALATE · Human review required',
         }[decision]
+        if decision == 'DEFER' and market and market['status'] == 'unavailable':
+            heading = 'DEFER · Price check unavailable'
         st.markdown(f'**{heading}**')
+        if deadline := evidence.get('deadline'):
+            needed_by = date.fromisoformat(deadline)
+            st.text(f'Needed by {needed_by:%B} {needed_by.day}, {needed_by.year}')
         st.text(message['text'])
         st.text(message['next_action'])
         if decision == 'ESCALATE':
             with st.expander('Escalation summary to share'):
                 st.code(escalation_summary(message), language='text')
 
+        if market:
+            with st.expander('Market price check', expanded=True):
+                st.text(market['summary'])
+                if market.get('scope'):
+                    st.text(market['scope'])
+                for index, price in enumerate(market['prices'], 1):
+                    st.text(f"{price['provider']} · ${Decimal(price['total_usd']):,.2f}\n{price['terms']}")
+                    st.link_button(f'Open price source {index}', price['url'])
+
         with st.expander('Verified checks and interpreted request'):
-            evidence = result['evidence']
             if 'available' in evidence:
                 st.text(f"{evidence['category']} available: ${Decimal(evidence['available']):,.2f}")
             if 'shortfall' in evidence:
                 st.text(f"Shortfall: ${Decimal(evidence['shortfall']):,.2f}")
             for item in evidence['escalation_reasons'] + evidence['missing']:
-                st.text(item)
+                if not market or item != market['summary']:
+                    st.text(item)
             st.markdown('**Policy checks**')
             for rule in evidence['rules']:
                 st.text(rule)
@@ -79,12 +98,13 @@ def display_chat_message(message):
 
 
 st.subheader('Review a purchase in chat')
-st.caption('Describe one purchase. You can reply with missing details or corrections.')
+st.caption('Describe a planned purchase or report money already spent.')
 if chat_enabled:
     disclosure = 'Chat sends fictional purchase details to OpenAI for review.'
     if logging_enabled:
-        disclosure += ' The conversation and decision are saved in the project database.'
+        disclosure += ' Reviews, payments, and budget updates are saved in the project database.'
     st.caption(disclosure)
+    st.caption('To record past spending, tell the chat what you paid, such as “We spent $100 for food”.')
 elif chat_requested:
     st.info('OpenAI chat needs an API key. Use Manual review below.')
 else:
@@ -93,44 +113,108 @@ else:
 with st.container():
     chat = st.session_state.setdefault('expense_review_chat', [])
     saved_reviews = st.session_state.setdefault('chat_review_history', {})
+    allocations = st.session_state.setdefault('chat_budget_allocations', {})
+    spending = st.session_state.setdefault('chat_spending', [])
+    unsaved_payments = st.session_state.setdefault('unsaved_payments', set())
     if chat and st.button('Start a new chat request'):
         chat.clear()
         st.session_state.pop('purchase_review_id', None)
         st.session_state.pop('chat_save_failed', None)
+        st.session_state.pop('budget_update_pending', None)
+        st.session_state.pop('spending_pending', None)
 
     history = st.container()
     with history:
         for message in chat:
             display_chat_message(message)
 
-    prompt = st.chat_input('Describe your purchase or add missing details', max_chars=2000,
+    prompt = st.chat_input('Describe a purchase, update a budget, or report a payment', max_chars=2000,
                            key='purchase_chat_input', disabled=not chat_enabled)
     if prompt and prompt.strip():
-        if 'purchase_review_id' not in st.session_state:
-            st.session_state['purchase_review_id'] = str(uuid4())
-        review_id = st.session_state['purchase_review_id']
-        message = {'role': 'user', 'text': prompt.strip()}
+        prompt = prompt.strip()
+        review_id = st.session_state.get('purchase_review_id')
+        snapshot = saved_reviews.get(review_id)
+        payment_command = PAYMENT_COMMAND.fullmatch(prompt)
+        review = (snapshot or {}).get('review') or {}
+        budget_action = budget_command(
+            prompt, [row['category'] for row in budgets], st.session_state.get('budget_update_pending', False),
+            reviewed_payment=bool(payment_command and review), pending_spending=st.session_state.get('spending_pending'),
+        )
+        if not budget_action or budget_action[0] in ('spend', 'spend_another'):
+            st.session_state.pop('spending_pending', None)
+        st.session_state['budget_update_pending'] = bool(budget_action and budget_action[0] == 'clarify')
+        recorded_payment = review.get('payment')
+        account_notice = bool(budget_action or payment_command or recorded_payment)
+        message = {'role': 'user', 'text': prompt, 'account_notice': account_notice}
         chat.append(message)
         with history:
             display_chat_message(message)
-            if logging_enabled:
-                save_review(supabase_url, supabase_key, review_snapshot(review_id, chat))
-            try:
-                with st.spinner('OpenAI is reviewing the request…'):
-                    conversation = [{'role': item['role'], 'text': item['text']} for item in chat if 'error' not in item]
-                    result = review_chat(conversation, api_key, budgets, ledger, policies, date.today())
-                reply = build_reply(result, policies['escalation_authority'])
-            except ChatReviewError as exc:
-                reply = {'role': 'assistant', 'text': str(exc), 'error': True}
-            chat.append(reply)
-            snapshot = review_snapshot(review_id, chat)
-            saved_reviews[review_id] = snapshot
-            if logging_enabled:
-                st.session_state['chat_save_failed'] = not save_review(supabase_url, supabase_key, snapshot)
+            current_ledger = session_ledger(ledger, saved_reviews.values(), spending)
+            current_budgets = session_budgets(budgets, allocations)
+            if budget_action:
+                try:
+                    text, event = apply_budget_command(budget_action, current_budgets, current_ledger, allocations, spending)
+                    if event and logging_enabled:
+                        if 'budget_session_id' not in st.session_state:
+                            st.session_state['budget_session_id'] = str(uuid4())
+                        related_review_id = review_id if event['kind'] == 'budget_allocation_updated' else None
+                        entry = {**event, 'session_id': st.session_state['budget_session_id'], 'review_id': related_review_id}
+                        if not record_submission(supabase_url, supabase_key, entry):
+                            st.session_state['budget_save_failed'] = True
+                except SpendingDetailsNeeded as exc:
+                    st.session_state['spending_pending'] = budget_action
+                    text = str(exc)
+                except ValueError as exc:
+                    text = str(exc)
+                reply = {'role': 'assistant', 'text': text, 'account_notice': True}
+                chat.append(reply)
+            elif account_notice:
+                updated = None
+                text = 'This purchase has a payment recorded. Use Start a new chat request for another purchase.'
+                if payment_command:
+                    try:
+                        updated, text = confirm_payment(snapshot, payment_command[1], current_budgets, current_ledger)
+                    except ValueError as exc:
+                        text = str(exc)
+                reply = {'role': 'assistant', 'text': text, 'account_notice': True}
+                chat.append(reply)
+                if updated is not None:
+                    changed = updated is not snapshot
+                    if changed:
+                        updated['transcript'] = chat_transcript(chat)
+                        saved_reviews[review_id] = updated
+                    if logging_enabled and (changed or review_id in unsaved_payments):
+                        if save_review(supabase_url, supabase_key, updated):
+                            unsaved_payments.discard(review_id)
+                        else:
+                            unsaved_payments.add(review_id)
+            else:
+                if review_id is None:
+                    review_id = st.session_state['purchase_review_id'] = str(uuid4())
+                messages = [item for item in chat if not (item.get('account_notice') or item.get('payment_notice'))]
+                if logging_enabled:
+                    save_review(supabase_url, supabase_key, review_snapshot(review_id, messages))
+                try:
+                    with st.spinner('OpenAI is reviewing the request…'):
+                        conversation = chat_transcript(item for item in messages if 'error' not in item)
+                        result = review_chat(conversation, api_key, current_budgets, current_ledger, policies, date.today())
+                    reply = build_reply(result, policies['escalation_authority'])
+                except ChatReviewError as exc:
+                    reply = {'role': 'assistant', 'text': str(exc), 'error': True}
+                chat.append(reply)
+                snapshot = review_snapshot(review_id, [*messages, reply])
+                saved_reviews[review_id] = snapshot
+                if logging_enabled:
+                    st.session_state['chat_save_failed'] = not save_review(supabase_url, supabase_key, snapshot)
             display_chat_message(reply)
 
     if st.session_state.get('chat_save_failed'):
         st.warning('Could not confirm that the latest review was saved to Supabase.')
+    if unsaved_payments:
+        st.warning('A payment is recorded in this session but could not be confirmed in Supabase. '
+                   'Repeat the same payment message in that request to retry the save.')
+    if st.session_state.get('budget_save_failed'):
+        st.warning('A budget change is recorded in this session. Its save to Supabase could not be confirmed.')
 
 if saved_reviews:
     with st.expander('Review history for this session'):
@@ -138,13 +222,18 @@ if saved_reviews:
         for snapshot in reversed(saved_reviews.values()):
             review = snapshot['review']
             request = review['result']['request'] if review else {}
+            payment = (review or {}).get('payment')
             rows.append({
                 'Purchase': request.get('description') or snapshot['transcript'][0]['text'],
                 'Decision': snapshot['status'],
-                'Next action': review['next_action'] if review else 'Retry chat or use Manual review.',
+                'Paid in this session': f"${Decimal(payment['amount']):,.2f}" if payment else '',
+                'Next action': ('Payment recorded.' if payment else
+                                review['next_action'] if review else 'Retry chat or use Manual review.'),
             })
         st.dataframe(rows, hide_index=True, width='stretch')
 
+budgets = session_budgets(budgets, allocations)
+ledger = session_ledger(ledger, saved_reviews.values(), spending)
 with st.expander('Budget records and spending rules'):
     st.subheader('Budget Overview')
     overview = budget_overview(budgets, ledger)
@@ -168,7 +257,7 @@ with st.expander('Budget records and spending rules'):
         st.markdown('**Category restrictions**')
         for category, restriction in policies['restricted_categories'].items():
             st.markdown(f'- **{category}** · {restriction}')
-    st.markdown('**Source ledger**')
+    st.markdown('**Ledger including payments reported in this session**')
     st.dataframe([{**r, 'amount': str(r['amount'])} for r in ledger], hide_index=True)
     st.caption('Edit local files in data/ to configure the prototype. Verification dates mean the entire category ledger has been reconciled, including outstanding commitments.')
 

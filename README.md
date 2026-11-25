@@ -134,7 +134,7 @@ sequenceDiagram
 
 ### Evaluation
 
-The existing **11/12 (91.7%)** score covers the Python form review. Test the active chat model separately with the original scenarios and conversational follow-ups, ambiguous categories, conflicting quotes, and stale records. Record the expected decisions and balances first. A recommendation to approve a request that exceeds available funds or violates a stated rule fails the evaluation.
+The hosted chatbot matched **12/12 comparable decision labels** in a single conversation. The [evaluation report](AGENT_EVALUATION.md) records all 14 cases, the limits of the hosted evidence, and the preregistered criteria. The Python form review scored **11/12 (91.7%)**. A recommendation to approve a request that exceeds available funds or violates a stated rule fails the preregistered hosted evaluation.
 
 ## Running the app
 
@@ -181,9 +181,23 @@ Add a key from a funded OpenAI API project and these top-level settings to **Str
 OPENAI_API_KEY = "your_actual_key"
 ```
 
-The default, `gpt-6-luna`, uses Standard rates and sets reasoning effort to `none`. The two responses per chat turn use structured output with a 512-token cap per response. Set `OPENAI_CHAT_MODEL` only if you want to use another model that supports structured outputs. The key enables chat by default. To pause it, set `OPENAI_CHAT_ENABLED = false`. [GPT-6 Luna pricing and capabilities](https://developers.openai.com/api/docs/models/gpt-6-luna)
+The default, `gpt-6-luna`, uses Standard rates and sets reasoning effort to `none`. Purchase reviews use structured output for extraction and the recommendation. A request that passes the budget and policy checks also uses a web-search response for a price comparison. Set `OPENAI_CHAT_MODEL` only if you want to use another model that supports structured outputs and web search. The key enables chat by default. To pause it, set `OPENAI_CHAT_ENABLED = false`. [GPT-6 Luna pricing and capabilities](https://developers.openai.com/api/docs/models/gpt-6-luna)
 
-Open **Review a purchase in chat** and send: “Can we rent a $450 van from Example Van Rentals for our club competition tomorrow? Their quote is $450. Use the Travel budget.” Expect **ESCALATE** for the $150 shortfall. For a follow-up test, send a request with no vendor or quote and reply with the missing details. Choose **Start a new chat request** before reviewing a different purchase.
+Open **Review a purchase in chat** and send “Can we rent a $450 van from Example Van Rentals for our club competition tomorrow? Their quote is $450. Use the Travel budget.” On a fresh session, expect **ESCALATE** for the $150 shortfall. Reply in the same request to add missing details. Date replies such as `tomorrow`, `two days from now`, and `11/27/26` update the **Needed by** date shown on the latest review. Choose **Start a new chat request** before reviewing a different purchase.
+
+### Check a purchase price
+
+For a van rental, include the pickup city, vehicle class, rental dates or duration, mileage, and what the quote covers. OpenAI searches for comparable public provider totals. **Market price check** shows the comparison terms, prices, and source links. The app needs two comparable provider totals to support a price. If the requested amount exceeds that range or a comparison is unavailable, the chat asks for more evidence before recommending approval. Already paid expenses are recorded through the payment flow.
+
+### Report a payment
+
+Type `We spent $300 on Travel` or `We paid $100 for food` to add a paid expense directly to the category. Food is recorded under Events. If the app asks which category to use, replying with the category or an item such as `food` continues the same expense entry. Use `We spent another $300 on Travel` for a separate expense of the same amount.
+
+After paying for the purchase that is open in chat, type `I paid $125.50` or `I paid for the $300 van rental`, using the actual total. The app records one payment per review and adds that amount to paid expenses for the reviewed category. A second confirmation for the same review leaves the balance unchanged.
+
+**Review history for this session** shows the reported payment. Later chat and manual reviews use the updated session balance. A fresh browser session starts with the sample records.
+
+In the same chat, type `Update the Travel budget to $2,200` to set the category's total allocation, `Add $50 to the Travel budget` to increase it, or `Show budget` to see available funds. Paid expenses and existing commitments still count against the new allocation.
 
 ### Try the form example
 
@@ -213,7 +227,7 @@ Each click of **Review purchase** saves the submitted fields and a database-gene
 
 3. Open Streamlit and click **Try a sample request → Review purchase**. Confirm **Submission saved** appears and inspect the new row in Supabase **Table Editor → purchase_submissions**. Use fictional form details for testing and keep the secret key in app settings.
 
-Each chat request gets one row in `purchase_reviews`. Follow-up replies update that row with the full transcript, latest status, verified budget snapshot, and next action. An escalation includes a copyable summary. The Streamlit history displays the current session’s requests. The Supabase Table Editor gives project administrators access to durable history across sessions.
+Each chat request gets one row in `purchase_reviews`. Follow-up replies update that row with the purchase transcript, latest recommendation, verified budget snapshot, and next action. An escalation includes a copyable summary. Payments tied to a review are saved under `review.payment`. Budget adjustments and direct expenses are written to `purchase_submissions.inputs` with the kinds `budget_allocation_updated` and `spending_reported`. The running balance stays scoped to the browser session.
 
 ### Validation
 

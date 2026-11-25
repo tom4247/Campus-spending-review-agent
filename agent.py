@@ -70,6 +70,7 @@ def review_chat(messages, api_key, budgets, ledger, policies, today):
     """Run the chat review using OpenAI's low-cost structured output model."""
     from openai import APIConnectionError, APIStatusError, OpenAI
     from chat_review import ChatReviewError, review_with_model
+    from market_prices import market_unavailable, search_market_prices
 
     default_model = 'gpt-6-luna'
     model = os.getenv('OPENAI_CHAT_MODEL') or default_model
@@ -113,7 +114,13 @@ def review_chat(messages, api_key, budgets, ledger, policies, today):
             except (TypeError, ValueError) as exc:
                 raise ChatReviewError('OpenAI returned an incomplete review. Try again or use Manual review.') from exc
 
-        return review_with_model(messages, budgets, ledger, policies, today, generate)
+        def compare_with_market(request):
+            try:
+                return search_market_prices(client, model, reasoning, request, messages)
+            except (APIConnectionError, APIStatusError, AttributeError, KeyError, TypeError, ValueError):
+                return market_unavailable()
+
+        return review_with_model(messages, budgets, ledger, policies, today, generate, compare_with_market)
 
 
 
