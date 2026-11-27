@@ -191,6 +191,8 @@ Start with `$20 for two people from Chipotle`. The agent checks the Events balan
 
 For a request such as `I want to spend 300 on a van rental`, the agent shows the budget and searches for public prices in the same reply. Without rental details, it uses a Pittsburgh one-day round-trip cargo van rental with 100 miles as its reference scenario and labels the assumptions. **Market price check** shows the sources and any excluded fees. Rentals require two comparable totals with confirmed availability to support approval. Already paid expenses go through the payment flow.
 
+If you have no more details for a pending purchase, say **“That’s all the information I have.”** The agent makes a final recommendation using the available evidence. If approval is unsupported, it recommends holding off or escalating and gives a concrete next step.
+
 ### Report a payment
 
 Type `We spent $300 on Travel` or `We paid $100 for food` to add a paid expense directly to the category. Food is recorded under Events. If the app asks which category to use, replying with the category or an item such as `food` continues the same expense entry. Use `We spent another $300 on Travel` for a separate expense of the same amount.

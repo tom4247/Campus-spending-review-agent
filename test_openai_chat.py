@@ -379,3 +379,43 @@ class OpenAIChatTests(unittest.TestCase):
                 self.assertEqual(result['decision'], decision)
                 allowed = json.loads(create.call_args.kwargs['input'])['allowed_outcomes']
                 self.assertNotIn('APPROVE', allowed)
+
+    def test_final_recommendation_uses_the_evidence_without_repeating_questions(self):
+        from purchase_chat import build_reply
+
+        response = price_response(('19',), 'Two meals for pickup.')
+        research = json.loads(response.output_text)
+        research['routine_estimate'] = True
+        response.output_text = json.dumps(research)
+
+        for amount, message, decision, step in (
+            ('45', 'that is all the informstion i have', 'DEFER', 'Choose two standard entrées at the published pickup price.'),
+            ('20', 'That’s all I have.', 'APPROVE', ''),
+            ('1950', 'I don’t have any more details.', 'ESCALATE', ''),
+        ):
+            with self.subTest(decision=decision), patch('openai.OpenAI') as client:
+                fields = {'description': 'Two meals', 'purpose': '', 'amount': amount, 'category': 'Events',
+                          'deadline': '', 'vendor': 'Chipotle', 'quote': ''}
+                outcome = {'decision': decision, 'reason': 'Based on the price and available funds.', 'next_step': step}
+                create = client.return_value.__enter__.return_value.responses.create
+                create.side_effect = [
+                    SimpleNamespace(status='completed', output_text=json.dumps(fields)), response,
+                    SimpleNamespace(status='completed', output_text=json.dumps(outcome)),
+                ]
+                messages = [{'role': 'user', 'text': f'${amount} for two people from Chipotle'},
+                            {'role': 'assistant', 'text': 'What is included in that price?'},
+                            {'role': 'user', 'text': message}]
+                budgets, ledger, policies = historical_records()
+                result = review_chat(messages, 'mock-key', budgets, ledger, policies, date(2026, 11, 25))
+                self.assertEqual(result['decision'], decision)
+                self.assertTrue(result['final_recommendation'])
+                self.assertEqual(result['follow_up'], '')
+                self.assertEqual(result['evidence']['available'], '1900.00')
+                call = create.call_args.kwargs
+                self.assertIn('Give a final recommendation', call['instructions'])
+                self.assertNotIn('follow_up', call['text']['format']['schema']['properties'])
+                reply = build_reply(result, policies['escalation_authority'])
+                self.assertNotIn('?', reply['text'])
+                self.assertNotIn('Reply', reply['next_action'])
+                if decision == 'DEFER':
+                    self.assertEqual(reply['next_action'], step)

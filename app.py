@@ -61,7 +61,11 @@ def display_chat_message(message):
             'DEFER': 'DEFER · More information needed',
             'ESCALATE': 'ESCALATE · Human review required',
         }[decision]
-        if decision == 'DEFER' and market and market['status'] == 'unavailable':
+        if result.get('final_recommendation'):
+            st.caption('Final recommendation')
+            if decision == 'DEFER':
+                heading = 'DEFER · Hold off on this purchase'
+        elif decision == 'DEFER' and market and market['status'] == 'unavailable':
             heading = 'DEFER · Price check unavailable'
         elif decision == 'DEFER' and market and market['status'] == 'insufficient_sources':
             heading = 'DEFER · Price comparison incomplete'
@@ -120,7 +124,7 @@ def display_chat_message(message):
 
 
 st.subheader('Review a purchase in chat')
-st.caption('Tell the chat what you want to buy and how much it costs. It checks local prices and the available budget.')
+st.caption('Describe what you want to buy and how much it costs. Say “That’s all I have” for a final recommendation.')
 if chat_enabled:
     disclosure = 'Chat sends fictional purchase details to OpenAI for review.'
     if logging_enabled:

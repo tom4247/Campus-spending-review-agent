@@ -50,7 +50,9 @@ def build_reply(result, escalation_authority):
                   if market.get('status') == 'supported_estimate' else
                   'Verify the supporting details and authorize the expense through your treasurer process.')
     elif decision == 'DEFER':
-        if any(item.startswith('Verify category records') for item in result['evidence']['missing']):
+        if result.get('final_recommendation'):
+            action = result.get('next_step', '').strip() or 'Have the treasurer review the available evidence before committing funds.'
+        elif any(item.startswith('Verify category records') for item in result['evidence']['missing']):
             action = 'Reconcile the budget records before relying on this review. Reply with other missing details.'
         elif market.get('status') == 'unavailable':
             action = 'Retry when live price search is available, or ask the treasurer to compare provider quotes.'

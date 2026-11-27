@@ -9,7 +9,7 @@ A requester describes a purchase in chat. OpenAI extracts the request and resear
 | Decision | What happens next |
 |---|---|
 | **APPROVE** | The request is ready for routine treasurer verification and authorization. |
-| **DEFER** | The model asks a specific follow-up question. The requester can reply in the same chat to correct or complete the request. Stale records require reconciliation. |
+| **DEFER** | The requester can reply to a follow-up in the same chat. If they have no more details, the agent gives a final recommendation to hold off and suggests a next step. Stale records require reconciliation. |
 | **ESCALATE** | The app shows a copyable summary with the request, available funds, verified policy triggers, and who should review it. The requester shares it with the authorized reviewer. |
 
 The sample policy requires additional authorization for requests **at or above $1,000**, advisor review for Equipment, and a quote or estimate. Records must be verified within 14 days. A request due today or tomorrow escalates when information is unresolved. Mandatory escalation takes precedence over deferral.
