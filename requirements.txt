@@ -1,4 +1,4 @@
-# Dependency versions used by the Streamlit demo.
+# Versions tested together for the Streamlit demo and OpenAI structured responses.
 streamlit==1.53.1
 openai==2.21.0
 python-dotenv==1.2.1
